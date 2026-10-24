@@ -1,5 +1,7 @@
 # Urumi Round 1: Implementation Plan (MCP Gateway on Kubernetes)
 
+> **Status (implementation):** every milestone below is now written but has not been deployed or tested. See the README for usage, and `docs/` for the design note, threat model, VPS guide and demo script.
+
 > Plan only, no code yet. Every design choice below is picked to be **simple enough to defend in the interview**.
 
 ## 0. Assumptions (correct these and the plan rescales)

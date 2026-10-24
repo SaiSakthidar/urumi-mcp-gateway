@@ -3,6 +3,7 @@ import { recordAudit, type Outcome } from "../audit/audit.js";
 import type { Principal } from "../auth/principal.js";
 import { describeError, upstreams, UpstreamTimeoutError } from "../upstreams/manager.js";
 import { splitToolName } from "./catalog.js";
+import { isToolAllowed } from "./permissions.js";
 
 // THE choke point. Every tool call, from an external MCP client or from the
 // dashboard chat agent, goes through callTool(). Routing, checks, timeouts and
@@ -56,6 +57,10 @@ export async function callTool(
   }
   if (!state.tools.some((t) => t.name === tool)) {
     return reject("not_found", `Server "${slug}" has no tool "${tool}".`);
+  }
+  // Hidden tools are also rejected when called directly by name.
+  if (!isToolAllowed(principal.role, slug, tool)) {
+    return reject("denied", `Your role (${principal.role}) is not allowed to use ${exposedName}.`);
   }
 
   try {

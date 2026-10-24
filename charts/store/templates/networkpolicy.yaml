@@ -1,15 +1,89 @@
-# MariaDB accepts connections only from WordPress and the setup Job.
+{{- if .Values.networkPolicy.enabled }}
+# Default deny: no pod in this namespace sends or receives anything unless a
+# policy below allows it.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: mariadb-from-wordpress
+  name: default-deny
+  labels:
+    {{- include "store.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+# WordPress: reached by the ingress controller (storefront) and by woo-mcp (REST API).
+# It talks to MariaDB and to the internet (plugin/theme updates).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: wordpress
+  labels:
+    {{- include "store.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: wordpress
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressController.namespace }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.ingressController.podLabels | nindent 14 }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.mcpNamespace }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: woo-mcp
+      ports:
+        - port: 80
+  egress:
+    {{- include "store.dnsEgress" . | nindent 4 }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: mariadb
+      ports:
+        - port: 3306
+    {{- include "store.internetEgress" . | nindent 4 }}
+---
+# Setup Job: talks to MariaDB and downloads WooCommerce from wordpress.org.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: store-setup
+  labels:
+    {{- include "store.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: store-setup
+  policyTypes: [Egress]
+  egress:
+    {{- include "store.dnsEgress" . | nindent 4 }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: mariadb
+      ports:
+        - port: 3306
+    {{- include "store.internetEgress" . | nindent 4 }}
+---
+# MariaDB: only WordPress and the setup Job may connect. No egress at all.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mariadb
   labels:
     {{- include "store.labels" . | nindent 4 }}
 spec:
   podSelector:
     matchLabels:
       app.kubernetes.io/name: mariadb
-  policyTypes: [Ingress]
+  policyTypes: [Ingress, Egress]
   ingress:
     - from:
         - podSelector:
@@ -20,3 +94,28 @@ spec:
               app.kubernetes.io/name: store-setup
       ports:
         - port: 3306
+  egress: []
+{{- end }}
+{{- if and .Values.networkPolicy.enabled .Values.ingress.tls.enabled }}
+---
+# cert-manager HTTP-01 challenge pods run in this namespace and must be
+# reachable from the ingress controller while a certificate is issued.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: acme-http01-solver
+  labels:
+    {{- include "store.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      acme.cert-manager.io/http01-solver: "true"
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressController.namespace }}
+      ports:
+        - port: 8089
+{{- end }}

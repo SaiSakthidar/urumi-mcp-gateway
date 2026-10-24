@@ -29,9 +29,17 @@ export const config = {
   healthTimeoutMs: Number(process.env.HEALTH_TIMEOUT_MS ?? 3_000),
   // A connected upstream is marked unreachable after this many failed checks in a row.
   healthFailThreshold: Number(process.env.HEALTH_FAIL_THRESHOLD ?? 2),
+  // Hostnames exempt from the SSRF guard: our own in-cluster MCP servers.
+  allowedInternalHosts: (process.env.ALLOWED_INTERNAL_HOSTS ?? "")
+    .split(",")
+    .map((h) => h.trim().toLowerCase())
+    .filter(Boolean),
+  // The chat agent tells the model today's date in this timezone (same as the store).
+  storeTimezone: process.env.STORE_TIMEZONE ?? "UTC",
   llm: {
     baseUrl: process.env.LLM_BASE_URL,
     model: process.env.LLM_MODEL,
     apiKey: process.env.LLM_API_KEY,
+    timeoutMs: Number(process.env.LLM_TIMEOUT_MS ?? 60_000),
   },
 };

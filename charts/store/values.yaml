@@ -14,6 +14,17 @@ ingress:
 persistence:
   storageClass: ""   # "" = cluster default
 
+networkPolicy:
+  # Default-deny NetworkPolicies + explicit allows. Set false only to debug a CNI
+  # that doesn't support NetworkPolicy.
+  enabled: true
+  # Where the ingress controller runs: Traefik in "traefik" on kind, "kube-system" on k3s.
+  ingressController:
+    namespace: traefik
+    podLabels:
+      app.kubernetes.io/name: traefik
+  mcpNamespace: mcp
+
 # Secrets are created out-of-band by scripts/create-secrets.sh, never by this chart.
 secrets:
   db: store-db          # keys: root-password, password

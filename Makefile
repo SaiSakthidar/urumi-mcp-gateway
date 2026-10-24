@@ -7,7 +7,7 @@ CLUSTER    ?= urumi
 TAG        ?= dev
 APPS       := woo-mcp gateway dashboard everything-mcp
 
-.PHONY: up down cluster secrets build load deploy deploy-store deploy-mcp deploy-platform status lint
+.PHONY: up down cluster secrets build load deploy deploy-store deploy-mcp deploy-platform status lint push history
 
 up: cluster secrets build load deploy ## Full local bring-up
 
@@ -37,6 +37,14 @@ deploy-mcp:
 
 deploy-platform:
 	helm upgrade --install platform charts/platform -n platform -f charts/platform/values-$(ENV).yaml
+
+push: ## Build multi-arch images and push: make push REGISTRY=ghcr.io/<user> TAG=0.1.0
+	./scripts/build-and-push.sh $(REGISTRY) $(TAG)
+
+history: ## Helm release history (for rollback: helm rollback <release> <revision> -n <ns>)
+	helm history store -n store
+	helm history mcp -n mcp
+	helm history platform -n platform
 
 status: ## Show what is running
 	kubectl get pods,svc,ingress,pvc -n store

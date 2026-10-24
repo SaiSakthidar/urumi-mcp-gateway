@@ -15,3 +15,6 @@ dashboard:
   image:
     repository: ghcr.io/<GHCR_USER>/urumi-dashboard
     tag: "0.1.0"
+networkPolicy:
+  ingressController:
+    namespace: kube-system   # k3s runs its bundled Traefik here

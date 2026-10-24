@@ -1,12 +1,15 @@
 import express from "express";
 import { auditRouter } from "./api/audit.js";
 import { authRouter } from "./api/auth.js";
+import { chatRouter } from "./api/chat.js";
 import { errorHandler, requireCsrfHeader } from "./api/http.js";
 import { keysRouter } from "./api/keys.js";
 import { membersRouter } from "./api/members.js";
+import { permissionsRouter } from "./api/permissions.js";
 import { serversRouter } from "./api/servers.js";
 import { bootstrap } from "./bootstrap.js";
 import { config } from "./config.js";
+import { loadRules } from "./core/permissions.js";
 import { migrate } from "./db/migrate.js";
 import { pool } from "./db/pool.js";
 import { mcpRouter } from "./mcp/endpoint.js";
@@ -47,6 +50,8 @@ app.use("/api/servers", serversRouter);
 app.use("/api/members", membersRouter);
 app.use("/api/keys", keysRouter);
 app.use("/api/audit", auditRouter);
+app.use("/api/permissions", permissionsRouter);
+app.use("/api/chat", chatRouter);
 app.use("/api", (_req, res) => {
   res.status(404).json({ error: "Not found" });
 });
@@ -56,6 +61,7 @@ app.use(errorHandler);
 async function main() {
   await migrate();
   await bootstrap();
+  await loadRules();
   await upstreams.start();
   const httpServer = app.listen(config.port, () => {
     console.log(`gateway listening on :${config.port}`);

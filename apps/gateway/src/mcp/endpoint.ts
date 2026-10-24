@@ -54,7 +54,7 @@ mcpRouter.post("/", async (req, res) => {
 
   const principal = auth.principal;
   const server = new Server({ name: "urumi-gateway", version: "0.1.0" }, { capabilities: { tools: {} } });
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: visibleTools() }));
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: visibleTools(principal) }));
   server.setRequestHandler(CallToolRequestSchema, async (request) =>
     callTool(principal, "mcp", request.params.name, request.params.arguments ?? {}),
   );

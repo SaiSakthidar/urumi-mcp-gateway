@@ -2,6 +2,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { ErrorCode, McpError, type CallToolResult, type Tool } from "@modelcontextprotocol/sdk/types.js";
 import { config } from "../config.js";
+import { assertSafeUpstreamUrl } from "../security/ssrf.js";
 import { listUpstreamRows, toConfig, type UpstreamConfig } from "./registry.js";
 
 // Keeps one MCP client per enabled upstream, plus its live status and tool list.
@@ -193,10 +194,13 @@ export class UpstreamManager {
   }
 
   private async connect(cfg: UpstreamConfig): Promise<Client> {
+    // Re-checked on every connect: the name may resolve somewhere else since it was saved.
+    await assertSafeUpstreamUrl(cfg.url);
     const client = new Client({ name: "urumi-gateway", version: "0.1.0" });
     // The decrypted credential is injected here, per upstream. It never leaves this process.
     const transport = new StreamableHTTPClientTransport(new URL(cfg.url), {
-      requestInit: { headers: cfg.headers },
+      // No redirects: a redirect could point the gateway at an internal address.
+      requestInit: { headers: cfg.headers, redirect: "error" },
     });
     try {
       await client.connect(transport, { timeout: config.healthTimeoutMs });

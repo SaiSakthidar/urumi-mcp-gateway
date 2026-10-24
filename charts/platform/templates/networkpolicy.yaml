@@ -1,15 +1,90 @@
-# Postgres accepts connections only from the gateway.
+{{- if .Values.networkPolicy.enabled }}
+# Default deny for the whole namespace.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: postgres-from-gateway
+  name: default-deny
+  labels:
+    {{- include "platform.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+# Gateway: reached only through the ingress controller. It talks to Postgres,
+# the in-cluster MCP servers, and public HTTPS (remote MCP servers, the LLM).
+# Private ranges are excluded from internet egress, so even a registered URL
+# that slips past the SSRF check can't reach other cluster services or cloud metadata.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gateway
+  labels:
+    {{- include "platform.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: gateway
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressController.namespace }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.ingressController.podLabels | nindent 14 }}
+      ports:
+        - port: 8080
+  egress:
+    {{- include "platform.dnsEgress" . | nindent 4 }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgres
+      ports:
+        - port: 5432
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.mcpNamespace }}
+    {{- include "platform.internetEgress" . | nindent 4 }}
+---
+# Dashboard: static files, reached only through the ingress controller. No egress.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: dashboard
+  labels:
+    {{- include "platform.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: dashboard
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressController.namespace }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.ingressController.podLabels | nindent 14 }}
+      ports:
+        - port: 8080
+  egress: []
+---
+# Postgres: only the gateway may connect. No egress.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres
   labels:
     {{- include "platform.labels" . | nindent 4 }}
 spec:
   podSelector:
     matchLabels:
       app.kubernetes.io/name: postgres
-  policyTypes: [Ingress]
+  policyTypes: [Ingress, Egress]
   ingress:
     - from:
         - podSelector:
@@ -17,3 +92,28 @@ spec:
               app.kubernetes.io/name: gateway
       ports:
         - port: 5432
+  egress: []
+{{- end }}
+{{- if and .Values.networkPolicy.enabled .Values.ingress.tls.enabled }}
+---
+# cert-manager HTTP-01 challenge pods run in this namespace and must be
+# reachable from the ingress controller while a certificate is issued.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: acme-http01-solver
+  labels:
+    {{- include "platform.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      acme.cert-manager.io/http01-solver: "true"
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressController.namespace }}
+      ports:
+        - port: 8089
+{{- end }}

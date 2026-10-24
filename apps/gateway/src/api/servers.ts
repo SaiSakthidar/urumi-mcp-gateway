@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { principalOf, requireAdmin, requireUser } from "../auth/sessions.js";
 import { exposedToolName } from "../core/catalog.js";
+import { assertSafeUpstreamUrl, SsrfError } from "../security/ssrf.js";
 import { upstreams } from "../upstreams/manager.js";
 import {
   createUpstream,
@@ -59,6 +60,15 @@ const createSchema = z
 
 const patchSchema = z.object(fields).partial();
 
+async function checkUrl(url: string): Promise<void> {
+  try {
+    await assertSafeUpstreamUrl(url);
+  } catch (err) {
+    if (err instanceof SsrfError) throw new HttpError(400, `URL rejected: ${err.message}`);
+    throw err;
+  }
+}
+
 function view(row: UpstreamRow, isAdmin: boolean) {
   const state = upstreams.get(row.slug);
   return {
@@ -89,6 +99,7 @@ serversRouter.get("/", async (_req, res) => {
 
 serversRouter.post("/", requireAdmin, async (req, res) => {
   const input = parseBody(createSchema, req.body);
+  await checkUrl(input.url);
   try {
     const id = await createUpstream(input, principalOf(res).userId);
     await upstreams.reload();
@@ -104,6 +115,7 @@ serversRouter.patch("/:id", requireAdmin, async (req, res) => {
   if (patch.authType === "header" && patch.authHeaderName === undefined) {
     throw new HttpError(400, "authHeaderName: required for header auth");
   }
+  if (patch.url !== undefined) await checkUrl(patch.url);
   if (!(await updateUpstream(idParam(req), patch))) throw new HttpError(404, "Server not found");
   await upstreams.reload();
   res.json({ ok: true });

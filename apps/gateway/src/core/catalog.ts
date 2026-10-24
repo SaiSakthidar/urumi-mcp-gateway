@@ -1,5 +1,7 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
+import type { Principal } from "../auth/principal.js";
 import { upstreams } from "../upstreams/manager.js";
+import { isToolAllowed } from "./permissions.js";
 
 // Tool naming: every tool is exposed as <slug>__<tool>, always, not only on
 // collisions. Names stay stable when servers are added, and since slugs can't
@@ -22,12 +24,16 @@ export function splitToolName(name: string): { slug: string; tool: string } | nu
 
 const warnedNames = new Set<string>();
 
-/** Tools of every enabled, connected upstream, prefixed. Read from the poller's cache. */
-export function visibleTools(): Tool[] {
+/**
+ * Tools of every enabled, connected upstream that this user's role may use,
+ * prefixed. Read from the poller's cache, so it never waits on an upstream.
+ */
+export function visibleTools(principal: Principal): Tool[] {
   const tools: Tool[] = [];
   for (const state of upstreams.all()) {
     if (!state.config.enabled || state.status !== "connected") continue;
     for (const tool of state.tools) {
+      if (!isToolAllowed(principal.role, state.config.slug, tool.name)) continue;
       const name = exposedToolName(state.config.slug, tool.name);
       if (!VALID_NAME.test(name)) {
         if (!warnedNames.has(name)) {

@@ -46,6 +46,14 @@ export interface ApiKey {
   revoked_at: string | null;
 }
 
+export interface ToolRule {
+  id: number;
+  role: Role;
+  upstream_slug: string;
+  tool_pattern: string;
+  effect: "allow" | "deny";
+}
+
 export interface AuditRow {
   id: number;
   ts: string;

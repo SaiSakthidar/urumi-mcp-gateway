@@ -13,6 +13,17 @@ ingress:
 persistence:
   storageClass: ""
 
+networkPolicy:
+  # Default-deny NetworkPolicies + explicit allows. Set false only to debug a CNI
+  # that doesn't support NetworkPolicy.
+  enabled: true
+  # Where the ingress controller runs: Traefik in "traefik" on kind, "kube-system" on k3s.
+  ingressController:
+    namespace: traefik
+    podLabels:
+      app.kubernetes.io/name: traefik
+  mcpNamespace: mcp
+
 gateway:
   image:
     repository: urumi/gateway
@@ -24,11 +35,18 @@ gateway:
   bootstrapAdminEmail: admin@urumi.local
   seedWooMcpUrl: http://woo-mcp.mcp.svc.cluster.local:3000/mcp
   upstreamCallTimeoutMs: 15000
+  # Our own in-cluster MCP servers; every other cluster-internal or private
+  # address is rejected as an upstream URL (SSRF guard).
+  allowedInternalHosts:
+    - woo-mcp.mcp.svc.cluster.local
+    - everything-mcp.mcp.svc.cluster.local
+  # The chat agent tells the model today's date in the store's timezone.
+  storeTimezone: Asia/Kolkata
   healthPollIntervalMs: 5000
   llm:
     # Any OpenAI-compatible chat completions endpoint.
     baseUrl: https://generativelanguage.googleapis.com/v1beta/openai/
-    model: gemini-2.5-flash
+    model: gemini-2.5-flash   # any tool-calling model the provider offers
   resources:
     requests: { cpu: 100m, memory: 128Mi }
     limits: { cpu: 1000m, memory: 384Mi }

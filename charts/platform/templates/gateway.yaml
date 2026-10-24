@@ -70,6 +70,10 @@ spec:
                 secretKeyRef: { name: {{ .Values.gateway.secretName }}, key: woo-mcp-token }
             - name: UPSTREAM_CALL_TIMEOUT_MS
               value: {{ .Values.gateway.upstreamCallTimeoutMs | quote }}
+            - name: ALLOWED_INTERNAL_HOSTS
+              value: {{ join "," .Values.gateway.allowedInternalHosts | quote }}
+            - name: STORE_TIMEZONE
+              value: {{ .Values.gateway.storeTimezone | quote }}
             - name: HEALTH_POLL_INTERVAL_MS
               value: {{ .Values.gateway.healthPollIntervalMs | quote }}
             - name: LLM_BASE_URL

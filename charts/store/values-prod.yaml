@@ -11,3 +11,6 @@ wordpress:
   resources:
     requests: { cpu: 200m, memory: 384Mi }
     limits: { cpu: 1000m, memory: 768Mi }
+networkPolicy:
+  ingressController:
+    namespace: kube-system   # k3s runs its bundled Traefik here

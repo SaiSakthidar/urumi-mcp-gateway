@@ -1,5 +1,8 @@
 # Defaults. Environment differences go in values-local.yaml / values-prod.yaml.
 
+networkPolicy:
+  enabled: true
+
 # Where the gateway runs. Only pods matching this may call the MCP servers.
 gateway:
   namespace: platform

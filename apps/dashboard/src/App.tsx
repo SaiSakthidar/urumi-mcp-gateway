@@ -7,6 +7,7 @@ import { ChatPage } from "./pages/Chat";
 import { KeysPage } from "./pages/Keys";
 import { LoginPage } from "./pages/Login";
 import { MembersPage } from "./pages/Members";
+import { PermissionsPage } from "./pages/Permissions";
 import { ServersPage } from "./pages/Servers";
 
 // Hash routing (#/servers, #/invite/<token>) keeps nginx config trivial and
@@ -25,6 +26,7 @@ function useHashPath(): string {
 const NAV = [
   { path: "/servers", label: "Servers", adminOnly: false },
   { path: "/members", label: "Members", adminOnly: true },
+  { path: "/permissions", label: "Permissions", adminOnly: true },
   { path: "/keys", label: "API keys", adminOnly: false },
   { path: "/audit", label: "Audit log", adminOnly: false },
   { path: "/chat", label: "Chat", adminOnly: false },
@@ -63,6 +65,7 @@ export function App() {
 
   let page;
   if (path === "/members" && me.role === "admin") page = <MembersPage me={me} />;
+  else if (path === "/permissions" && me.role === "admin") page = <PermissionsPage />;
   else if (path === "/keys") page = <KeysPage me={me} />;
   else if (path === "/audit") page = <AuditPage me={me} />;
   else if (path === "/chat") page = <ChatPage />;

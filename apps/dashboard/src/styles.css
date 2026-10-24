@@ -55,3 +55,17 @@ tr.revoked { color: #999; }
 .tools { margin: 8px 0 0; padding-left: 18px; }
 .tools li { margin-bottom: 4px; }
 details summary { cursor: pointer; margin-top: 8px; color: #555; }
+
+/* Chat */
+.chat { display: flex; flex-direction: column; height: calc(100vh - 48px); }
+.chat-log { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 8px 0; }
+.examples { display: flex; gap: 8px; flex-wrap: wrap; }
+.bubble { max-width: 75%; padding: 10px 12px; border-radius: 8px; background: #fff; border: 1px solid #ddd; }
+.bubble.user { align-self: flex-end; background: #1a1a1a; color: #fff; border-color: #1a1a1a; }
+.bubble.assistant { align-self: flex-start; }
+.bubble-text { white-space: pre-wrap; }
+.tool-calls { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+.tool-chip { background: #e3f7e9; border-radius: 4px; padding: 2px 8px; font-size: 13px; }
+.tool-chip.failed { background: #fde8e7; }
+.tool-chip summary { margin: 0; font-family: ui-monospace, monospace; color: inherit; }
+.tool-chip pre { max-height: 200px; overflow: auto; }

@@ -2,6 +2,7 @@
 
 # Dashboard + gateway are served at app.<domain> (/ → dashboard, /api and /mcp → gateway).
 domain: 127.0.0.1.sslip.io
+scheme: http
 
 ingress:
   className: traefik

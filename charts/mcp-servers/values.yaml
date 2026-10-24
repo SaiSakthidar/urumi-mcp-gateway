@@ -14,9 +14,10 @@ wooMcp:
   # Created by scripts/create-secrets.sh. Keys: wc-consumer-key, wc-consumer-secret, mcp-token
   secretName: woo-mcp
   store:
-    # In-cluster WordPress Service. The store's Ingress host is sent as Host header.
+    # In-cluster WordPress Service, plus the store's public host (its WP_HOME):
+    # sent as Host header and used for OAuth signatures.
     baseUrl: http://wordpress.store.svc.cluster.local
-    hostHeader: shop.127.0.0.1.sslip.io
+    publicHost: shop.127.0.0.1.sslip.io
     namespace: store
     timezone: Asia/Kolkata
   resources:

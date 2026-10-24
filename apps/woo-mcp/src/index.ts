@@ -4,10 +4,19 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { config } from "./config.js";
 import { registerTools } from "./tools.js";
+import { WooClient } from "./woo-client.js";
+
+const wc = new WooClient({
+  baseUrl: config.wcBaseUrl,
+  publicHost: config.wcPublicHost,
+  consumerKey: config.wcConsumerKey,
+  consumerSecret: config.wcConsumerSecret,
+  timeoutMs: config.wcTimeoutMs,
+});
 
 function buildServer(): McpServer {
   const server = new McpServer({ name: "woo-mcp", version: "0.1.0" });
-  registerTools(server);
+  registerTools(server, wc, config.storeTimezone);
   return server;
 }
 

@@ -5,7 +5,7 @@ CREATE TABLE users (
   email              text NOT NULL UNIQUE,
   role               text NOT NULL CHECK (role IN ('admin', 'member')),
   status             text NOT NULL DEFAULT 'invited' CHECK (status IN ('invited', 'active', 'disabled')),
-  password_hash      text,             -- argon2id; null until the invite is accepted
+  password_hash      text,             -- scrypt; null until the invite is accepted
   invite_token_hash  text UNIQUE,      -- sha256 of the one-time invite token
   invite_expires_at  timestamptz,
   created_at         timestamptz NOT NULL DEFAULT now()
@@ -28,9 +28,12 @@ CREATE TABLE api_keys (
   last_used_at  timestamptz,
   revoked_at    timestamptz            -- soft delete: revoked calls stay attributable
 );
+CREATE INDEX api_keys_user_idx ON api_keys (user_id);
 
 CREATE TABLE upstreams (
   id                     bigserial PRIMARY KEY,
+  -- Tool names are exposed as <slug>__<tool>; slugs can't contain "_", so the
+  -- first "__" always separates slug from tool. Slugs are immutable.
   slug                   text NOT NULL UNIQUE CHECK (slug ~ '^[a-z0-9-]{1,16}$'),
   display_name           text NOT NULL,
   url                    text NOT NULL,
@@ -53,7 +56,11 @@ CREATE TABLE audit_events (
   upstream_slug  text,
   tool_name      text,
   duration_ms    integer,
-  outcome        text NOT NULL CHECK (outcome IN ('ok', 'tool_error', 'timeout', 'unreachable', 'denied', 'auth_revoked')),
+  -- ok: upstream returned a result | tool_error: upstream returned isError
+  -- timeout / unreachable / disabled / not_found / error: gateway-side failures
+  -- denied: blocked by tool permissions | auth_revoked: revoked key or disabled user
+  outcome        text NOT NULL CHECK (outcome IN ('ok', 'tool_error', 'timeout', 'unreachable', 'disabled',
+                                                  'not_found', 'error', 'denied', 'auth_revoked')),
   error_message  text
 );
 CREATE INDEX audit_events_ts_idx ON audit_events (ts DESC);

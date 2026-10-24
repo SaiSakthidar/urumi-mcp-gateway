@@ -21,7 +21,7 @@ secrets:
   wcApi: store-wc-api   # keys: consumer-key, consumer-secret
 
 mariadb:
-  image: mariadb:11.4
+  image: mariadb:11.8
   database: wordpress
   user: wordpress
   storage: 2Gi
@@ -30,7 +30,7 @@ mariadb:
     limits: { cpu: 500m, memory: 512Mi }
 
 wordpress:
-  image: wordpress:6.8-php8.3-apache
+  image: wordpress:7.1-php8.3-apache
   storage: 2Gi
   adminUser: admin
   adminEmail: admin@urumi.local
@@ -38,4 +38,22 @@ wordpress:
   timezone: Asia/Kolkata
   resources:
     requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: 1000m, memory: 512Mi }
+
+# Post-install/upgrade Job that turns a blank WordPress into a working store.
+# Every step is idempotent, so it is safe to re-run on each `helm upgrade`.
+setup:
+  # Must match the PHP version of the WordPress image. Runs as www-data (uid 33)
+  # so files it writes are owned the same way as in the WordPress container.
+  image: wordpress:cli-2.12-php8.3
+  woocommerce:
+    version: ""            # "" = latest stable; pin e.g. "10.3.0" for reproducible installs
+    country: IN:TN         # store base location (country:state)
+    currency: INR
+  seedProducts:
+    - { name: "Urumi T-Shirt", price: "499" }
+    - { name: "Urumi Mug", price: "299" }
+    - { name: "Urumi Sticker Pack", price: "99" }
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
     limits: { cpu: 1000m, memory: 512Mi }

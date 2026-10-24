@@ -2,7 +2,7 @@
 
 A WooCommerce store on Kubernetes plus a team MCP gateway. An admin registers MCP servers once in a dashboard. Every team member then uses all of them through **one MCP endpoint** with their own API key, or through a chat agent in the dashboard.
 
-> Status: early scaffold. See [`docs/PLAN.md`](docs/PLAN.md) for the architecture, milestones and design decisions.
+> Status: milestones M1–M5 are written (store setup, WooCommerce MCP server, gateway, team management, dashboard), but nothing has been deployed or tested yet. The chat agent (M6) is next. See [`docs/PLAN.md`](docs/PLAN.md) for the architecture, milestones and design decisions.
 
 ## Layout
 
@@ -43,6 +43,51 @@ make status
 
 Charts never create Secrets. `scripts/create-secrets.sh <env>` creates the namespaces and every Secret from `.secrets/<env>.env` (gitignored). Random values are generated on first run. Put your LLM key and GitHub PAT in that file by hand, then re-run `make secrets`.
 
+### First login
+
+The gateway creates one admin on first boot:
+
+```bash
+# email: admin@urumi.local (charts/platform values: gateway.bootstrapAdminEmail)
+grep BOOTSTRAP_ADMIN_PASSWORD .secrets/local.env
+```
+
+WordPress admin (`http://shop.127.0.0.1.sslip.io/wp-admin`) is user `admin`, password `WP_ADMIN_PASSWORD` in the same file.
+
+### Place an order
+
+The `store-setup` Job installs WooCommerce, seeds three products, enables cash on delivery and disables shipping. Open the storefront, add a product to the cart, check out with **Cash on delivery**, then find the order under WooCommerce → Orders.
+
+### Register the other MCP servers
+
+The WooCommerce server is registered automatically as `woo`. Add the others in **Servers → Add server**:
+
+| Slug | URL | Auth |
+|---|---|---|
+| `everything` | `http://everything-mcp.mcp.svc.cluster.local:3001/mcp` | none |
+| `github` | `https://api.githubcopilot.com/mcp/` | Bearer token = a fine-grained GitHub PAT |
+
+Every tool is exposed as `<slug>__<tool>` (e.g. `woo__list_orders`), so two servers can have tools with the same name.
+
+### Invite a teammate and connect an MCP client
+
+1. **Members → Invite** creates the user and shows a one-time invite link. The teammate opens it and sets a password.
+2. The teammate opens **API keys → Generate key** (shown once).
+3. Connect a client with only the gateway URL and that key:
+
+```bash
+claude mcp add --transport http urumi http://app.127.0.0.1.sslip.io/mcp \
+  --header "Authorization: Bearer urumi_xxxxxxxx_..."
+```
+
+Or use MCP Inspector (`npx @modelcontextprotocol/inspector`) with transport "Streamable HTTP", the same URL, and an `Authorization` header.
+
+The gateway is stateless (no MCP sessions), so after a server is disabled, clients see the change on their next tool listing (Inspector: "List Tools"; Claude Code: `/mcp` → reconnect).
+
+### Audit log
+
+**Audit log** shows every tool call with user, server, tool, time, duration and outcome. Admins see everyone; members see their own. Calls with a revoked key show up as `auth_revoked` under the key's owner.
+
 ## Development
 
 ```bash
@@ -64,8 +109,6 @@ Full instructions arrive with milestone M8.
 
 ## Still to document
 
-- [ ] Placing an order on the storefront
-- [ ] Connecting Claude Code / Cursor / MCP Inspector to the gateway
-- [ ] Using the chat agent
+- [ ] Using the chat agent (M6)
 - [ ] Upgrade and rollback with Helm
 - [ ] Design and tradeoffs note, threat model note

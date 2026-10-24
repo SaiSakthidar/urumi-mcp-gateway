@@ -4,7 +4,7 @@ wooMcp:
     repository: ghcr.io/<GHCR_USER>/urumi-woo-mcp
     tag: "0.1.0"
   store:
-    hostHeader: shop.<VPS_IP>.sslip.io
+    publicHost: shop.<VPS_IP>.sslip.io
 everything:
   image:
     repository: ghcr.io/<GHCR_USER>/urumi-everything-mcp

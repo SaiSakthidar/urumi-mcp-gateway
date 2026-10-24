@@ -1,0 +1,195 @@
+{{- $fullSetup := .Values.setup -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: store-setup
+  labels:
+    {{- include "store.labels" . | nindent 4 }}
+data:
+  setup.sh: |
+    #!/bin/sh
+    # Turns a blank WordPress into a working WooCommerce store.
+    # Every step is idempotent: re-running it (on each helm upgrade) is safe.
+    set -eu
+    cd /var/www/html
+
+    echo "==> Waiting for WordPress files (copied by the wordpress container on first start)"
+    until [ -f wp-config.php ]; do sleep 5; done
+
+    echo "==> Waiting for MariaDB"
+    until php -r '$m = @new mysqli(getenv("WORDPRESS_DB_HOST"), getenv("WORDPRESS_DB_USER"), getenv("WORDPRESS_DB_PASSWORD"), getenv("WORDPRESS_DB_NAME")); exit($m->connect_errno ? 1 : 0);'; do
+      sleep 5
+    done
+
+    echo "==> WordPress core"
+    if ! wp core is-installed; then
+      wp core install \
+        --url="$SITE_URL" \
+        --title="$SITE_TITLE" \
+        --admin_user="$ADMIN_USER" \
+        --admin_password="$ADMIN_PASSWORD" \
+        --admin_email="$ADMIN_EMAIL" \
+        --skip-email
+    fi
+    wp option update timezone_string "$STORE_TIMEZONE"
+    # Pretty permalinks so the REST API lives at /wp-json/.
+    wp rewrite structure '/%postname%/'
+
+    echo "==> WooCommerce plugin"
+    if ! wp plugin is-installed woocommerce; then
+      if [ -n "$WC_VERSION" ]; then
+        wp plugin install woocommerce --version="$WC_VERSION"
+      else
+        wp plugin install woocommerce
+      fi
+    fi
+    wp plugin is-active woocommerce || wp plugin activate woocommerce
+
+    echo "==> WooCommerce settings"
+    wp option update woocommerce_default_country "$WC_COUNTRY"
+    wp option update woocommerce_currency "$WC_CURRENCY"
+    # New stores start in "coming soon" mode, which hides the shop from visitors.
+    wp option update woocommerce_coming_soon no
+    wp option update woocommerce_store_pages_only no
+    # No shipping: otherwise checkout fails with "no shipping options" for physical products.
+    wp option update woocommerce_ship_to_countries disabled
+    # Skip the onboarding wizard and setup task list in wp-admin.
+    wp option update woocommerce_onboarding_profile '{"skipped":true}' --format=json
+    wp option update woocommerce_task_list_hidden yes
+    # Shop / cart / checkout / my-account pages (no-op if they exist).
+    wp wc tool run install_pages --user="$ADMIN_USER"
+    # Cash on delivery as the test-friendly payment method.
+    wp wc payment_gateway update cod --enabled=true --user="$ADMIN_USER"
+
+    echo "==> REST API key for woo-mcp"
+    wp eval-file /setup/create-api-key.php
+
+    echo "==> Seed products (only into an empty store)"
+    if [ "$(wp post list --post_type=product --post_status=any --format=count)" = "0" ]; then
+      {{- range $fullSetup.seedProducts }}
+      wp wc product create --user="$ADMIN_USER" --name={{ .name | quote }} --regular_price={{ .price | quote }} --status=publish
+      {{- end }}
+    fi
+
+    echo "==> Store ready at $SITE_URL"
+
+  create-api-key.php: |
+    <?php
+    // Inserts the WooCommerce REST API key whose values come from the
+    // store-wc-api Secret, so woo-mcp can be configured before the store exists.
+    // WooCommerce stores the consumer key as an HMAC hash (wc_api_hash) and the
+    // consumer secret in plain text (it is needed to verify OAuth signatures).
+    global $wpdb;
+
+    $consumer_key    = getenv('WC_CONSUMER_KEY');
+    $consumer_secret = getenv('WC_CONSUMER_SECRET');
+    $user            = get_user_by('login', getenv('ADMIN_USER'));
+    if (!$consumer_key || !$consumer_secret || !$user) {
+        WP_CLI::error('Missing WC_CONSUMER_KEY, WC_CONSUMER_SECRET or admin user');
+    }
+
+    $table = $wpdb->prefix . 'woocommerce_api_keys';
+    $hash  = wc_api_hash($consumer_key);
+    $id    = $wpdb->get_var($wpdb->prepare("SELECT key_id FROM {$table} WHERE consumer_key = %s", $hash));
+
+    if ($id) {
+        // Keep the secret in sync in case it was rotated.
+        $wpdb->update($table, ['consumer_secret' => $consumer_secret], ['key_id' => $id]);
+        WP_CLI::log("API key already present (key_id {$id})");
+        return;
+    }
+
+    $wpdb->insert($table, [
+        'user_id'         => $user->ID,
+        'description'     => 'urumi woo-mcp',
+        'permissions'     => 'read_write',
+        'consumer_key'    => $hash,
+        'consumer_secret' => $consumer_secret,
+        'truncated_key'   => substr($consumer_key, -7),
+    ]);
+    WP_CLI::success('Created WooCommerce REST API key');
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: store-setup
+  labels:
+    {{- include "store.labels" . | nindent 4 }}
+    app.kubernetes.io/name: store-setup
+  annotations:
+    # Runs after every install/upgrade; the previous Job is deleted first.
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 900
+  template:
+    metadata:
+      labels:
+        {{- include "store.labels" . | nindent 8 }}
+        app.kubernetes.io/name: store-setup
+    spec:
+      restartPolicy: OnFailure
+      automountServiceAccountToken: false
+      # www-data in the Debian-based WordPress image is uid 33 (the alpine
+      # wp-cli image uses 82), so pin it to keep file ownership consistent.
+      securityContext:
+        runAsUser: 33
+        runAsGroup: 33
+        runAsNonRoot: true
+      containers:
+        - name: setup
+          image: {{ .Values.setup.image }}
+          command: ["sh", "/setup/setup.sh"]
+          env:
+            {{- include "store.wordpressEnv" . | nindent 12 }}
+            - name: HOME
+              value: /tmp
+            - name: WP_CLI_CACHE_DIR
+              value: /tmp/wp-cli-cache
+            - name: SITE_URL
+              value: {{ include "store.url" . | quote }}
+            - name: SITE_TITLE
+              value: {{ .Values.wordpress.siteTitle | quote }}
+            - name: ADMIN_USER
+              value: {{ .Values.wordpress.adminUser | quote }}
+            - name: ADMIN_EMAIL
+              value: {{ .Values.wordpress.adminEmail | quote }}
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ .Values.secrets.admin }}, key: admin-password }
+            - name: STORE_TIMEZONE
+              value: {{ .Values.wordpress.timezone | quote }}
+            - name: WC_VERSION
+              value: {{ .Values.setup.woocommerce.version | quote }}
+            - name: WC_COUNTRY
+              value: {{ .Values.setup.woocommerce.country | quote }}
+            - name: WC_CURRENCY
+              value: {{ .Values.setup.woocommerce.currency | quote }}
+            - name: WC_CONSUMER_KEY
+              valueFrom:
+                secretKeyRef: { name: {{ .Values.secrets.wcApi }}, key: consumer-key }
+            - name: WC_CONSUMER_SECRET
+              valueFrom:
+                secretKeyRef: { name: {{ .Values.secrets.wcApi }}, key: consumer-secret }
+          resources:
+            {{- toYaml .Values.setup.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            # Same RWO volume as WordPress: fine on a single-node cluster
+            # (kind locally, single-node k3s in prod).
+            - name: wordpress
+              mountPath: /var/www/html
+            - name: scripts
+              mountPath: /setup
+              readOnly: true
+      volumes:
+        - name: wordpress
+          persistentVolumeClaim:
+            claimName: wordpress-data
+        - name: scripts
+          configMap:
+            name: store-setup

@@ -12,9 +12,11 @@ export const config = {
   mcpToken: required("MCP_TOKEN"),
   // In-cluster WordPress Service, e.g. http://wordpress.store.svc.cluster.local
   wcBaseUrl: required("WC_BASE_URL"),
-  // Public host of the store; sent as Host header so WordPress doesn't redirect.
-  wcHostHeader: process.env.WC_HOST_HEADER,
+  // The store's public host (its WP_HOME). Sent as the Host header and used
+  // for OAuth signatures, because WordPress verifies against its home URL.
+  wcPublicHost: required("WC_PUBLIC_HOST"),
   wcConsumerKey: required("WC_CONSUMER_KEY"),
   wcConsumerSecret: required("WC_CONSUMER_SECRET"),
+  wcTimeoutMs: Number(process.env.WC_TIMEOUT_MS ?? 10_000),
   storeTimezone: process.env.STORE_TIMEZONE ?? "UTC",
 };

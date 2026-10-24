@@ -1,5 +1,6 @@
 # Replace <VPS_IP> / <GHCR_USER>. Pin tags to a released version.
 domain: <VPS_IP>.sslip.io
+scheme: https
 ingress:
   tls:
     enabled: true

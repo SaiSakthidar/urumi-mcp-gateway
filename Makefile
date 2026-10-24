@@ -29,7 +29,8 @@ load: ## Load images into kind
 deploy: deploy-store deploy-mcp deploy-platform ## helm upgrade --install all three releases
 
 deploy-store:
-	helm upgrade --install store charts/store -n store -f charts/store/values-$(ENV).yaml
+	# The setup Job (post-install hook) downloads WooCommerce, so allow extra time.
+	helm upgrade --install store charts/store -n store -f charts/store/values-$(ENV).yaml --timeout 15m
 
 deploy-mcp:
 	helm upgrade --install mcp charts/mcp-servers -n mcp -f charts/mcp-servers/values-$(ENV).yaml

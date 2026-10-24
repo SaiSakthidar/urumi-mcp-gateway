@@ -1,4 +1,4 @@
-# MariaDB accepts connections only from WordPress pods in this namespace.
+# MariaDB accepts connections only from WordPress and the setup Job.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -15,5 +15,8 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: wordpress
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: store-setup
       ports:
         - port: 3306

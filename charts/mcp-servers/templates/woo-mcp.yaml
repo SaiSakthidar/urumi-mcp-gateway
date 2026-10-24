@@ -45,8 +45,8 @@ spec:
               value: "3000"
             - name: WC_BASE_URL
               value: {{ .Values.wooMcp.store.baseUrl | quote }}
-            - name: WC_HOST_HEADER
-              value: {{ .Values.wooMcp.store.hostHeader | quote }}
+            - name: WC_PUBLIC_HOST
+              value: {{ .Values.wooMcp.store.publicHost | quote }}
             - name: STORE_TIMEZONE
               value: {{ .Values.wooMcp.store.timezone | quote }}
             - name: WC_CONSUMER_KEY

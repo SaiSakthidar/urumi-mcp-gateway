@@ -1,0 +1,8 @@
+wooMcp:
+  image:
+    pullPolicy: Never   # images are loaded with `kind load docker-image`
+  store:
+    hostHeader: shop.127.0.0.1.sslip.io
+everything:
+  image:
+    pullPolicy: Never

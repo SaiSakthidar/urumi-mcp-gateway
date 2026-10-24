@@ -103,7 +103,7 @@ urumi/
 ├── scripts/
 │   ├── kind-up.sh                # cluster + Traefik helm install
 │   ├── build-and-load.sh         # docker build + kind load docker-image
-│   ├── create-prod-secrets.sh    # kubectl create secret ... from .env.prod (gitignored)
+│   ├── create-secrets.sh         # namespaces + Secrets from .secrets/<env>.env (gitignored)
 │   └── smoke.sh                  # curl-based DoD checks (MCP initialize, list, call, 401)
 ├── apps/
 │   ├── woo-mcp/                  # src/{index.ts, woo-client.ts, oauth1.ts, tools/*.ts}, Dockerfile
@@ -137,7 +137,6 @@ urumi/
 │           ├── dashboard-{deployment,service}.yaml
 │           ├── postgres-{statefulset,service}.yaml
 │           ├── ingress.yaml
-│           ├── secrets.yaml      # only rendered when secrets.create=true (local)
 │           └── networkpolicies.yaml
 └── docs/
     ├── PLAN.md  design-and-tradeoffs.md  threat-model.md  local-domains.md  demo-script.md
@@ -154,7 +153,7 @@ urumi/
 | `ingress.tls.enabled` / `certManager.issuer` | `false` | `true` / `letsencrypt-prod` (optional stretch) |
 | `persistence.storageClass` | `standard` (kind local-path) | `local-path` (k3s) |
 | `image.repository` / `pullPolicy` | `urumi/gateway` / `Never` (kind-loaded) | `ghcr.io/<you>/gateway` / `IfNotPresent`, pinned tag |
-| `secrets.create` | `true`: chart generates random values via `lookup` + `randAlphaNum` with `helm.sh/resource-policy: keep` so upgrades keep them | `false` + `existingSecret: …`, created out-of-band by `create-prod-secrets.sh` |
+| Secrets | `scripts/create-secrets.sh local` generates random values into `.secrets/local.env` (gitignored) and applies them as Secrets | Same script with `prod`; LLM key / GitHub PAT filled in by hand. Charts **never** create Secrets, they only reference them by name, so both environments use the same secrets flow |
 | `wordpress.siteUrl` | `http://shop.127.0.0.1.sslip.io` | `https://shop.<dom>` (+ `X-Forwarded-Proto` handling) |
 | `resources` | small requests | slightly larger requests; same limits shape |
 | `llm.baseURL` / `llm.model` | free tier | same, or a paid model |
@@ -348,7 +347,7 @@ Recording tips: pre-create user B before recording to save time if needed, but s
 | 10 | Readiness vs liveness, and why doesn't woo-mcp's readiness check WooCommerce? | Liveness = restart me if wedged; readiness = send me traffic. Chaining readiness to a dependency would cascade one outage into all pods going NotReady; the health poller reports dependency failures instead. |
 | 11 | How does the chat agent act as the logged-in user? | The principal comes from the server-side session cookie and is passed to the same `ToolRouter.callTool` used by `/mcp`; the LLM only chooses tool names and arguments, never identity. |
 | 12 | What can a malicious upstream do? | Inject instructions via descriptions/results, return fake data, and see the args routed to it. It can't see other upstreams' creds or user keys. Mitigations: admin review, prefixes, permissions, egress policy, audit. |
-| 13 | What changes between kind and k3s? | Only values: domain, TLS, storageClass, image registry/pullPolicy, `secrets.create` → `existingSecret`, resource sizes. The templates are identical, and Traefik is the ingress class in both. |
+| 13 | What changes between kind and k3s? | Only values: domain, TLS, storageClass, image registry/pullPolicy, Secret values (same names, same script), resource sizes. The templates are identical, and Traefik is the ingress class in both. |
 | 14 | How do you upgrade and roll back? | `helm upgrade <release> --set image.tag=X` (rolling), `helm history`, `helm rollback <release> <rev>`; PVCs survive because they belong to the StatefulSet/kept PVC; DB migrations are additive-only so the previous version still runs. |
 | 15 | Why REST + OAuth1 instead of WP-CLI or SQL? | REST is the versioned public contract and runs WooCommerce's business logic; WP-CLI would need `pods/exec` RBAC and SQL bypasses hooks and HPOS. OAuth1 is required because in-cluster traffic is plain HTTP. |
 

@@ -1,0 +1,34 @@
+# Defaults. Environment differences go in values-local.yaml / values-prod.yaml.
+
+# Where the gateway runs. Only pods matching this may call the MCP servers.
+gateway:
+  namespace: platform
+  podLabels:
+    app.kubernetes.io/name: gateway
+
+wooMcp:
+  image:
+    repository: urumi/woo-mcp
+    tag: dev
+    pullPolicy: IfNotPresent
+  # Created by scripts/create-secrets.sh. Keys: wc-consumer-key, wc-consumer-secret, mcp-token
+  secretName: woo-mcp
+  store:
+    # In-cluster WordPress Service. The store's Ingress host is sent as Host header.
+    baseUrl: http://wordpress.store.svc.cluster.local
+    hostHeader: shop.127.0.0.1.sslip.io
+    namespace: store
+    timezone: Asia/Kolkata
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { cpu: 500m, memory: 256Mi }
+
+everything:
+  enabled: true
+  image:
+    repository: urumi/everything-mcp
+    tag: dev
+    pullPolicy: IfNotPresent
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { cpu: 500m, memory: 256Mi }

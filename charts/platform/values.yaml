@@ -1,0 +1,53 @@
+# Defaults. Environment differences go in values-local.yaml / values-prod.yaml.
+
+# Dashboard + gateway are served at app.<domain> (/ → dashboard, /api and /mcp → gateway).
+domain: 127.0.0.1.sslip.io
+
+ingress:
+  className: traefik
+  tls:
+    enabled: false
+    clusterIssuer: ""
+
+persistence:
+  storageClass: ""
+
+gateway:
+  image:
+    repository: urumi/gateway
+    tag: dev
+    pullPolicy: IfNotPresent
+  # Created by scripts/create-secrets.sh. Keys: encryption-key,
+  # bootstrap-admin-password, woo-mcp-token, llm-api-key, github-pat
+  secretName: gateway
+  bootstrapAdminEmail: admin@urumi.local
+  seedWooMcpUrl: http://woo-mcp.mcp.svc.cluster.local:3000/mcp
+  upstreamCallTimeoutMs: 15000
+  healthPollIntervalMs: 5000
+  llm:
+    # Any OpenAI-compatible chat completions endpoint.
+    baseUrl: https://generativelanguage.googleapis.com/v1beta/openai/
+    model: gemini-2.5-flash
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { cpu: 1000m, memory: 384Mi }
+
+dashboard:
+  image:
+    repository: urumi/dashboard
+    tag: dev
+    pullPolicy: IfNotPresent
+  resources:
+    requests: { cpu: 20m, memory: 32Mi }
+    limits: { cpu: 200m, memory: 128Mi }
+
+postgres:
+  image: postgres:17-alpine
+  database: urumi
+  user: urumi
+  # Created by scripts/create-secrets.sh. Key: password
+  secretName: platform-db
+  storage: 1Gi
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 512Mi }

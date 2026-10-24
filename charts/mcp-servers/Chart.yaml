@@ -1,0 +1,6 @@
+apiVersion: v2
+name: mcp-servers
+description: Cluster-internal MCP servers (WooCommerce MCP + server-everything) for the Urumi gateway
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

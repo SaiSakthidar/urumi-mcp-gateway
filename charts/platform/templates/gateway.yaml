@@ -1,0 +1,90 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  labels:
+    {{- include "platform.labels" . | nindent 4 }}
+    app.kubernetes.io/name: gateway
+spec:
+  selector:
+    app.kubernetes.io/name: gateway
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  labels:
+    {{- include "platform.labels" . | nindent 4 }}
+    app.kubernetes.io/name: gateway
+spec:
+  # Single replica: upstream health status and the tool catalog live in memory.
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gateway
+  template:
+    metadata:
+      labels:
+        {{- include "platform.labels" . | nindent 8 }}
+        app.kubernetes.io/name: gateway
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: gateway
+          image: "{{ .Values.gateway.image.repository }}:{{ .Values.gateway.image.tag }}"
+          imagePullPolicy: {{ .Values.gateway.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: PORT
+              value: "8080"
+            - name: PGHOST
+              value: postgres
+            - name: PGDATABASE
+              value: {{ .Values.postgres.database }}
+            - name: PGUSER
+              value: {{ .Values.postgres.user }}
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ .Values.postgres.secretName }}, key: password }
+            - name: ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef: { name: {{ .Values.gateway.secretName }}, key: encryption-key }
+            - name: BOOTSTRAP_ADMIN_EMAIL
+              value: {{ .Values.gateway.bootstrapAdminEmail | quote }}
+            - name: BOOTSTRAP_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ .Values.gateway.secretName }}, key: bootstrap-admin-password }
+            - name: SEED_WOO_MCP_URL
+              value: {{ .Values.gateway.seedWooMcpUrl | quote }}
+            - name: SEED_WOO_MCP_TOKEN
+              valueFrom:
+                secretKeyRef: { name: {{ .Values.gateway.secretName }}, key: woo-mcp-token }
+            - name: UPSTREAM_CALL_TIMEOUT_MS
+              value: {{ .Values.gateway.upstreamCallTimeoutMs | quote }}
+            - name: HEALTH_POLL_INTERVAL_MS
+              value: {{ .Values.gateway.healthPollIntervalMs | quote }}
+            - name: LLM_BASE_URL
+              value: {{ .Values.gateway.llm.baseUrl | quote }}
+            - name: LLM_MODEL
+              value: {{ .Values.gateway.llm.model | quote }}
+            - name: LLM_API_KEY
+              valueFrom:
+                secretKeyRef: { name: {{ .Values.gateway.secretName }}, key: llm-api-key }
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.gateway.resources | nindent 12 }}
+          securityContext:
+            runAsUser: 1000
+            {{- include "platform.containerSecurityContext" . | nindent 12 }}

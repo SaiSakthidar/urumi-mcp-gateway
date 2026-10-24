@@ -1,0 +1,4 @@
+domain: 127.0.0.1.sslip.io
+scheme: http
+persistence:
+  storageClass: standard   # kind's local-path provisioner

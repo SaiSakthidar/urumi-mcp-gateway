@@ -1,0 +1,13 @@
+# Replace <VPS_IP> with the server's public IP (or use a real domain).
+domain: <VPS_IP>.sslip.io
+scheme: https
+ingress:
+  tls:
+    enabled: true
+    clusterIssuer: letsencrypt-prod
+persistence:
+  storageClass: local-path   # k3s built-in
+wordpress:
+  resources:
+    requests: { cpu: 200m, memory: 384Mi }
+    limits: { cpu: 1000m, memory: 768Mi }

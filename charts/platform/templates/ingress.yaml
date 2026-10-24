@@ -1,0 +1,35 @@
+# One public host: / → dashboard, /api and /mcp → gateway.
+# Same origin means no CORS and a simple SameSite=Strict session cookie.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: app
+  labels:
+    {{- include "platform.labels" . | nindent 4 }}
+  {{- if .Values.ingress.tls.enabled }}
+  annotations:
+    cert-manager.io/cluster-issuer: {{ .Values.ingress.tls.clusterIssuer }}
+  {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts: [{{ include "platform.host" . }}]
+      secretName: app-tls
+  {{- end }}
+  rules:
+    - host: {{ include "platform.host" . }}
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service: { name: gateway, port: { name: http } }
+          - path: /mcp
+            pathType: Prefix
+            backend:
+              service: { name: gateway, port: { name: http } }
+          - path: /
+            pathType: Prefix
+            backend:
+              service: { name: dashboard, port: { name: http } }

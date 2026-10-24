@@ -1,0 +1,62 @@
+{{- if .Values.everything.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: everything-mcp
+  labels:
+    {{- include "mcp.labels" . | nindent 4 }}
+    app.kubernetes.io/name: everything-mcp
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: everything-mcp
+  ports:
+    - name: http
+      port: 3001
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: everything-mcp
+  labels:
+    {{- include "mcp.labels" . | nindent 4 }}
+    app.kubernetes.io/name: everything-mcp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: everything-mcp
+  template:
+    metadata:
+      labels:
+        {{- include "mcp.labels" . | nindent 8 }}
+        app.kubernetes.io/name: everything-mcp
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: everything-mcp
+          image: "{{ .Values.everything.image.repository }}:{{ .Values.everything.image.tag }}"
+          imagePullPolicy: {{ .Values.everything.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 3001
+          # Third-party server without a health endpoint: check the port.
+          readinessProbe:
+            tcpSocket: { port: http }
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: { port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.everything.resources | nindent 12 }}
+          securityContext:
+            {{- include "mcp.containerSecurityContext" . | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- end }}

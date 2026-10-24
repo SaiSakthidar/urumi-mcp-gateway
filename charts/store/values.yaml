@@ -1,0 +1,41 @@
+# Defaults. Environment differences go in values-local.yaml / values-prod.yaml.
+
+# Base domain. Storefront is served at shop.<domain>.
+domain: 127.0.0.1.sslip.io
+scheme: http
+
+ingress:
+  className: traefik
+  tls:
+    enabled: false
+    # cert-manager ClusterIssuer; only used when tls.enabled=true
+    clusterIssuer: ""
+
+persistence:
+  storageClass: ""   # "" = cluster default
+
+# Secrets are created out-of-band by scripts/create-secrets.sh, never by this chart.
+secrets:
+  db: store-db          # keys: root-password, password
+  admin: store-admin    # keys: admin-password
+  wcApi: store-wc-api   # keys: consumer-key, consumer-secret
+
+mariadb:
+  image: mariadb:11.4
+  database: wordpress
+  user: wordpress
+  storage: 2Gi
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: 500m, memory: 512Mi }
+
+wordpress:
+  image: wordpress:6.8-php8.3-apache
+  storage: 2Gi
+  adminUser: admin
+  adminEmail: admin@urumi.local
+  siteTitle: Urumi Store
+  timezone: Asia/Kolkata
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: 1000m, memory: 512Mi }

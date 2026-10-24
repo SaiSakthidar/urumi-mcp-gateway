@@ -1,0 +1,21 @@
+# Traefik on kind: bind host ports 80/443 on the ingress-ready node.
+# k3s ships Traefik already, so this file is local-only.
+deployment:
+  kind: Deployment
+ports:
+  web:
+    hostPort: 80
+  websecure:
+    hostPort: 443
+service:
+  type: ClusterIP
+nodeSelector:
+  ingress-ready: "true"
+tolerations:
+  - key: node-role.kubernetes.io/control-plane
+    operator: Exists
+    effect: NoSchedule
+ingressClass:
+  enabled: true
+  isDefaultClass: true
+  name: traefik

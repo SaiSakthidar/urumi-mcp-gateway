@@ -1,0 +1,9 @@
+domain: 127.0.0.1.sslip.io
+persistence:
+  storageClass: standard
+gateway:
+  image:
+    pullPolicy: Never
+dashboard:
+  image:
+    pullPolicy: Never

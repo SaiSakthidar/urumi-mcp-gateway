@@ -11,7 +11,6 @@ A WooCommerce store on Kubernetes plus a team MCP gateway. An admin registers MC
 - [VPS / k3s deployment](docs/vps.md)
 - [Upgrades and rollbacks](docs/operations.md)
 - [Demo flow](docs/demo-dod.md) (definition of done, step by step)
-- [Demo script](docs/demo-script.md)
 
 ## Architecture
 
@@ -272,7 +271,7 @@ make lint                      # helm lint, local values
 make lint-prod                 # render + check the production values
 ```
 
-Everything that needs Postgres or Kubernetes (OAuth flow, rate limits, stores, hosted servers) is exercised on a real cluster; see the demo script.
+Everything that needs Postgres or Kubernetes (OAuth flow, rate limits, stores, hosted servers) is exercised on a real cluster by `scripts/e2e.sh`.
 
 ## Development
 

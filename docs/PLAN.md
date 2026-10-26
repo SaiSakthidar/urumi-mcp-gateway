@@ -1,6 +1,6 @@
 # Urumi Round 1: Implementation Plan (MCP Gateway on Kubernetes)
 
-> **Status:** this is the original plan, kept for reference. Everything in it is implemented and was tested on kind and on a k3s server on AWS; see the README for what exists and `docs/` for the design note, threat model, VPS guide and demo scripts.
+> **Status:** this is the original plan, kept for reference. Everything in it is implemented and was tested on kind and on a k3s server on AWS; see the README for what exists and `docs/` for the design note, threat model, VPS guide and demo flow.
 
 > Plan only, no code yet. Every design choice below is picked to be **simple enough to defend in the interview**.
 
@@ -141,7 +141,7 @@ urumi/
 │           ├── ingress.yaml
 │           └── networkpolicies.yaml
 └── docs/
-    ├── PLAN.md  design-and-tradeoffs.md  threat-model.md  local-domains.md  demo-script.md
+    ├── PLAN.md  design-and-tradeoffs.md  threat-model.md  local-domains.md  demo-script.md (since replaced by demo-dod.md)
 ```
 
 **Three charts and three releases instead of an umbrella chart.** Each release maps to one namespace, `helm rollback store 3` affects only the store, and the upgrade/rollback story (stand-out #9) comes for free. `make deploy-local` runs the three `helm upgrade --install` commands in order.

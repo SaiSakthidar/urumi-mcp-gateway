@@ -21,6 +21,8 @@ wooMcp:
     # sent as Host header and used for OAuth signatures.
     baseUrl: http://wordpress.store.svc.cluster.local
     publicHost: shop.127.0.0.1.sslip.io
+    # Only when the store's ingress is on a non-default port (match the store release's `port`).
+    publicPort: ""
     namespace: store
     timezone: Asia/Kolkata
   resources:

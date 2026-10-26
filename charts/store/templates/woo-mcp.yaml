@@ -1,0 +1,138 @@
+{{- if .Values.wooMcp.enabled }}
+# This store's own WooCommerce MCP server. Same image as the shared one; it talks to
+# the WordPress Service in this namespace, so it has no path to any other store.
+apiVersion: v1
+kind: Service
+metadata:
+  name: woo-mcp
+  labels:
+    {{- include "store.labels" . | nindent 4 }}
+    app.kubernetes.io/name: woo-mcp
+spec:
+  type: ClusterIP   # internal only; there is deliberately no Ingress
+  selector:
+    app.kubernetes.io/name: woo-mcp
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: woo-mcp
+  labels:
+    {{- include "store.labels" . | nindent 4 }}
+    app.kubernetes.io/name: woo-mcp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: woo-mcp
+  template:
+    metadata:
+      labels:
+        {{- include "store.labels" . | nindent 8 }}
+        app.kubernetes.io/name: woo-mcp
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: woo-mcp
+          image: "{{ .Values.wooMcp.image.repository }}:{{ .Values.wooMcp.image.tag }}"
+          imagePullPolicy: {{ .Values.wooMcp.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            - name: PORT
+              value: "3000"
+            - name: WC_BASE_URL
+              value: http://wordpress
+            - name: WC_PUBLIC_HOST
+              value: "{{ include "store.host" . }}{{ if .Values.port }}:{{ .Values.port }}{{ end }}"
+            - name: STORE_TIMEZONE
+              value: {{ .Values.wooMcp.timezone | quote }}
+            - name: WC_CONSUMER_KEY
+              valueFrom:
+                secretKeyRef: { name: {{ .Values.wooMcp.secretName }}, key: wc-consumer-key }
+            - name: WC_CONSUMER_SECRET
+              valueFrom:
+                secretKeyRef: { name: {{ .Values.wooMcp.secretName }}, key: wc-consumer-secret }
+            - name: MCP_TOKEN
+              valueFrom:
+                secretKeyRef: { name: {{ .Values.wooMcp.secretName }}, key: mcp-token }
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.wooMcp.resources | nindent 12 }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+{{- if .Values.networkPolicy.enabled }}
+---
+# Only the gateway pods may call this MCP server.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: woo-mcp
+  labels:
+    {{- include "store.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: woo-mcp
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.wooMcp.gateway.namespace }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.wooMcp.gateway.podLabels | nindent 14 }}
+      ports:
+        - port: 3000
+  # It may only talk to this store's WordPress (port 80): not MariaDB, not another
+  # store's namespace, not the internet.
+  egress:
+    {{- include "store.dnsEgress" . | nindent 4 }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: wordpress
+      ports:
+        - port: 80
+---
+# Lets this store's own woo-mcp reach WordPress. (The main chart's WordPress policy
+# only admits the shared woo-mcp from the mcp namespace.)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: wordpress-from-woo-mcp
+  labels:
+    {{- include "store.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: wordpress
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: woo-mcp
+      ports:
+        - port: 80
+{{- end }}
+{{- end }}

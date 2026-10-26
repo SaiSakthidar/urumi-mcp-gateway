@@ -5,11 +5,11 @@ helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
 {{- end }}
 
 {{- define "store.host" -}}
-shop.{{ .Values.domain }}
+{{ .Values.hostPrefix | default "shop" }}.{{ .Values.domain }}
 {{- end }}
 
 {{- define "store.url" -}}
-{{ .Values.scheme }}://{{ include "store.host" . }}
+{{ .Values.scheme }}://{{ include "store.host" . }}{{ if .Values.port }}:{{ .Values.port }}{{ end }}
 {{- end }}
 
 {{/* DB + site env shared by WordPress and the setup Job (wp-config.php reads these). */}}

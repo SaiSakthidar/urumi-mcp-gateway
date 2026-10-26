@@ -1,8 +1,12 @@
 # Defaults. Environment differences go in values-local.yaml / values-prod.yaml.
 
-# Base domain. Storefront is served at shop.<domain>.
+# Base domain. Storefront is served at <hostPrefix>.<domain> (default shop.<domain>).
+# Provisioned stores get hostPrefix "shop-<slug>" so every store has its own host.
+hostPrefix: shop
 domain: 127.0.0.1.sslip.io
 scheme: http
+# Only set when the ingress is not on the default port for the scheme (e.g. 8080 when port 80 is taken locally).
+port: ""
 
 ingress:
   className: traefik
@@ -68,3 +72,35 @@ setup:
   resources:
     requests: { cpu: 100m, memory: 128Mi }
     limits: { cpu: 1000m, memory: 512Mi }
+
+# A WooCommerce MCP server inside this store's own namespace. Off for the main store (it is
+# deployed by charts/mcp-servers); on for provisioned stores, so each store is self-contained
+# and its MCP server can only reach its own WordPress.
+wooMcp:
+  enabled: false
+  image:
+    repository: urumi/woo-mcp
+    tag: dev
+    pullPolicy: IfNotPresent
+  # Created by the provisioner. Keys: wc-consumer-key, wc-consumer-secret, mcp-token
+  secretName: woo-mcp
+  timezone: Asia/Kolkata
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { cpu: 500m, memory: 256Mi }
+  # Where the gateway runs: the only pods allowed to call this MCP server.
+  gateway:
+    namespace: platform
+    podLabels:
+      app.kubernetes.io/name: gateway
+
+# Per-store guardrails: a store cannot use more than this, however it is configured.
+quota:
+  enabled: false
+  requestsCpu: "2"
+  requestsMemory: 3Gi
+  limitsCpu: "4"
+  limitsMemory: 5Gi
+  pods: "12"
+  persistentVolumeClaims: "4"
+  requestsStorage: 10Gi

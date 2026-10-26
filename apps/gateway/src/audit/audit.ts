@@ -9,7 +9,8 @@ export type Outcome =
   | "not_found"
   | "error"
   | "denied"
-  | "auth_revoked";
+  | "auth_revoked"
+  | "rate_limited";
 
 export interface AuditEvent {
   userId: number | null;

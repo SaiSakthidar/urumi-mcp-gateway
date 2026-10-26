@@ -7,8 +7,10 @@ import { ChatPage } from "./pages/Chat";
 import { KeysPage } from "./pages/Keys";
 import { LoginPage } from "./pages/Login";
 import { MembersPage } from "./pages/Members";
+import { MetricsPage } from "./pages/Metrics";
 import { PermissionsPage } from "./pages/Permissions";
 import { ServersPage } from "./pages/Servers";
+import { StoresPage } from "./pages/Stores";
 
 // Hash routing (#/servers, #/invite/<token>) keeps nginx config trivial and
 // lets invite links work without any server-side routes.
@@ -25,10 +27,12 @@ function useHashPath(): string {
 
 const NAV = [
   { path: "/servers", label: "Servers", adminOnly: false },
+  { path: "/stores", label: "Stores", adminOnly: false },
   { path: "/members", label: "Members", adminOnly: true },
   { path: "/permissions", label: "Permissions", adminOnly: true },
   { path: "/keys", label: "API keys", adminOnly: false },
   { path: "/audit", label: "Audit log", adminOnly: false },
+  { path: "/metrics", label: "Metrics", adminOnly: false },
   { path: "/chat", label: "Chat", adminOnly: false },
 ];
 
@@ -68,6 +72,8 @@ export function App() {
   else if (path === "/permissions" && me.role === "admin") page = <PermissionsPage />;
   else if (path === "/keys") page = <KeysPage me={me} />;
   else if (path === "/audit") page = <AuditPage me={me} />;
+  else if (path === "/stores") page = <StoresPage />;
+  else if (path === "/metrics") page = <MetricsPage />;
   else if (path === "/chat") page = <ChatPage />;
   else page = <ServersPage me={me} />;
 

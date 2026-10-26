@@ -21,8 +21,15 @@ metadata:
     {{- include "platform.labels" . | nindent 4 }}
     app.kubernetes.io/name: gateway
 spec:
-  # Single replica: upstream health status and the tool catalog live in memory.
-  replicas: 1
+  # More than one replica works: MCP is stateless (no sessions), rate-limit counters, sessions,
+  # OAuth tokens and the audit log live in Postgres, and each replica runs its own health
+  # poller, so upstream status converges on every pod.
+  replicas: {{ .Values.gateway.replicas }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: gateway
@@ -33,6 +40,18 @@ spec:
         app.kubernetes.io/name: gateway
     spec:
       automountServiceAccountToken: false
+      {{- if gt (int .Values.gateway.replicas) 1 }}
+      # Spread replicas over nodes when there is more than one.
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: gateway
+      {{- end }}
       containers:
         - name: gateway
           image: "{{ .Values.gateway.image.repository }}:{{ .Values.gateway.image.tag }}"
@@ -45,7 +64,7 @@ spec:
               value: "8080"
             # Used for invite links and the MCP URL shown in the dashboard; https also turns on Secure cookies.
             - name: PUBLIC_URL
-              value: "{{ .Values.scheme }}://{{ include "platform.host" . }}"
+              value: "{{ .Values.scheme }}://{{ include "platform.host" . }}{{ if .Values.port }}:{{ .Values.port }}{{ end }}"
             - name: PGHOST
               value: postgres
             - name: PGDATABASE
@@ -76,6 +95,18 @@ spec:
               value: {{ .Values.gateway.storeTimezone | quote }}
             - name: HEALTH_POLL_INTERVAL_MS
               value: {{ .Values.gateway.healthPollIntervalMs | quote }}
+            - name: RATE_LIMIT_PER_MINUTE
+              value: {{ .Values.gateway.rateLimitPerMinute | quote }}
+            - name: TOOL_SEARCH_THRESHOLD
+              value: {{ .Values.gateway.toolSearchThreshold | quote }}
+            - name: HOSTED_NAMESPACE
+              value: {{ .Values.provisioner.hostedNamespace | quote }}
+            - name: HOSTED_IMAGE_REGISTRIES
+              value: {{ join "," .Values.gateway.hostedImageRegistries | quote }}
+            - name: MAX_STORES_PER_USER
+              value: {{ .Values.gateway.maxStoresPerUser | quote }}
+            - name: MAX_STORES_TOTAL
+              value: {{ .Values.gateway.maxStoresTotal | quote }}
             - name: LLM_BASE_URL
               value: {{ .Values.gateway.llm.baseUrl | quote }}
             - name: LLM_MODEL
@@ -95,3 +126,18 @@ spec:
           securityContext:
             runAsUser: 1000
             {{- include "platform.containerSecurityContext" . | nindent 12 }}
+{{- if gt (int .Values.gateway.replicas) 1 }}
+---
+# Keeps at least one gateway pod serving during node drains and upgrades.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: gateway
+  labels:
+    {{- include "platform.labels" . | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gateway
+{{- end }}

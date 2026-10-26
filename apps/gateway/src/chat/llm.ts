@@ -30,29 +30,40 @@ export function llmConfigured(): boolean {
   return Boolean(config.llm.baseUrl && config.llm.model && config.llm.apiKey);
 }
 
+const RETRYABLE = new Set([429, 500, 502, 503, 504]);
+const MAX_ATTEMPTS = 3;
+
 export async function chatCompletion(messages: LlmMessage[], tools: LlmTool[]): Promise<LlmReply> {
   const baseUrl = config.llm.baseUrl ?? "";
   const endpoint = new URL("chat/completions", baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`);
 
-  let res: Response;
-  try {
-    res = await fetch(endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.llm.apiKey}` },
-      body: JSON.stringify({
-        model: config.llm.model,
-        messages,
-        tools: tools.length ? tools : undefined,
-        temperature: 0,
-      }),
-      signal: AbortSignal.timeout(config.llm.timeoutMs),
-    });
-  } catch (err) {
-    throw new LlmError(`LLM request failed: ${err instanceof Error ? err.message : String(err)}`);
-  }
+  // Providers return transient 429/503 under load, so retry those a couple of times.
+  let text = "";
+  for (let attempt = 1; ; attempt++) {
+    let res: Response;
+    try {
+      res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.llm.apiKey}` },
+        body: JSON.stringify({
+          model: config.llm.model,
+          messages,
+          tools: tools.length ? tools : undefined,
+          temperature: 0,
+        }),
+        signal: AbortSignal.timeout(config.llm.timeoutMs),
+      });
+    } catch (err) {
+      throw new LlmError(`LLM request failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
 
-  const text = await res.text();
-  if (!res.ok) throw new LlmError(`LLM returned HTTP ${res.status}: ${text.slice(0, 300)}`);
+    text = await res.text();
+    if (res.ok) break;
+    if (!RETRYABLE.has(res.status) || attempt === MAX_ATTEMPTS) {
+      throw new LlmError(`LLM returned HTTP ${res.status}: ${text.slice(0, 300)}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+  }
 
   let body: { choices?: { message?: LlmReply }[] };
   try {

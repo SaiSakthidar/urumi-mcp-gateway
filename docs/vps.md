@@ -49,9 +49,13 @@ echo $GITHUB_TOKEN | docker login ghcr.io -u <user> --password-stdin
 make push REGISTRY=ghcr.io/<user> TAG=0.1.0
 ```
 
-Make the four GHCR packages public (simplest), or add an `imagePullSecret`.
+Make the five GHCR packages public (simplest), or add an `imagePullSecret`.
 
-**5. Values.** In the three `values-prod.yaml` files, replace `<VPS_IP>` and `<GHCR_USER>`, and set the image tag you pushed.
+**5. Values.** In the three `values-prod.yaml` files, replace `<VPS_IP>` and `<GHCR_USER>`, and set the image tag you pushed (the platform file also names the provisioner and the woo-mcp image that provisioned stores use). Then check them offline:
+
+```bash
+make lint-prod
+```
 
 **6. Secrets.** On the VPS (or anywhere with its kubeconfig):
 
@@ -71,6 +75,15 @@ kubectl get pods -A
 ```
 
 Open `https://shop.<VPS_IP>.sslip.io` and `https://app.<VPS_IP>.sslip.io`.
+
+## Stores and hosted servers on the VPS
+
+The same provisioner runs here. Differences to know:
+
+- Store hosts are `shop-<id>.<domain>`. With `ingress.tls.enabled` each store requests its own certificate through cert-manager.
+- The provisioner's API-server egress rule is `0.0.0.0/0` on ports 6443 and 443 by default. On k3s, set `networkPolicy.apiServerCidr` to `<node-ip>/32` to tighten it.
+- Each store adds about 1 CPU and 1.5 GiB of memory (WordPress, MariaDB, its MCP server), capped by its ResourceQuota. Size the VPS for `gateway.maxStoresTotal` stores, or lower the cap.
+- Hosted-server images are pulled from the registries in `gateway.hostedImageRegistries`; private images would need an `imagePullSecret` in `mcp-hosted`.
 
 ## Gotchas
 

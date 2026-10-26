@@ -1,0 +1,189 @@
+{{- if .Values.provisioner.enabled }}
+# The provisioner: the only component with Kubernetes API access. The gateway never
+# gets it; it writes desired state to Postgres and this process makes it so.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: provisioner
+  labels:
+    {{- include "platform.labels" . | nindent 4 }}
+---
+# What a store namespace's provisioner may do inside that namespace. Bound per
+# namespace with a RoleBinding (never cluster-wide), so it can read the Secrets of the
+# stores and hosted servers it creates and nothing else.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: urumi-store-admin
+  labels:
+    {{- include "platform.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [secrets, configmaps, services, persistentvolumeclaims, resourcequotas, limitranges]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [""]
+    resources: [pods, pods/log, events]
+    verbs: [get, list, watch]
+  - apiGroups: [apps]
+    resources: [deployments, statefulsets]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [apps]
+    resources: [replicasets]   # helm --wait inspects them to judge a Deployment's readiness
+    verbs: [get, list, watch]
+  - apiGroups: [batch]
+    resources: [jobs]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [networking.k8s.io]
+    resources: [ingresses, networkpolicies]
+    verbs: [get, list, watch, create, update, patch, delete]
+---
+# What the provisioner may do cluster-wide: manage namespaces, and bind the role above
+# in them. It may bind only that one role ("bind" is limited by resourceNames), so it
+# cannot grant itself or anyone else anything broader.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: urumi-provisioner
+  labels:
+    {{- include "platform.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [namespaces]
+    verbs: [get, list, create, update, patch, delete]
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [rolebindings]
+    verbs: [get, list, create, update, patch, delete]
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [clusterroles]
+    verbs: [bind]
+    resourceNames: [urumi-store-admin]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: urumi-provisioner
+  labels:
+    {{- include "platform.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: urumi-provisioner
+subjects:
+  - kind: ServiceAccount
+    name: provisioner
+    namespace: {{ .Release.Namespace }}
+---
+# Values every provisioned store shares, derived from this release so a store looks like
+# the main one on whatever environment this is (domain, ingress, storage, images).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: provisioner-store-values
+  labels:
+    {{- include "platform.labels" . | nindent 4 }}
+data:
+  store-values.yaml: |
+    domain: {{ .Values.domain | quote }}
+    scheme: {{ .Values.scheme }}
+    port: {{ .Values.port | quote }}
+    ingress:
+      className: {{ .Values.ingress.className }}
+      tls:
+        enabled: {{ .Values.ingress.tls.enabled }}
+        clusterIssuer: {{ .Values.ingress.tls.clusterIssuer | quote }}
+    persistence:
+      storageClass: {{ .Values.persistence.storageClass | quote }}
+    networkPolicy:
+      enabled: {{ .Values.networkPolicy.enabled }}
+      ingressController:
+        namespace: {{ .Values.networkPolicy.ingressController.namespace }}
+        podLabels:
+          {{- toYaml .Values.networkPolicy.ingressController.podLabels | nindent 10 }}
+    wooMcp:
+      enabled: true
+      image:
+        repository: {{ .Values.provisioner.wooMcpImage.repository }}
+        tag: {{ .Values.provisioner.wooMcpImage.tag | quote }}
+        pullPolicy: {{ .Values.provisioner.wooMcpImage.pullPolicy }}
+      gateway:
+        namespace: {{ .Release.Namespace }}
+    quota:
+      enabled: true
+      {{- with .Values.provisioner.storeQuota }}
+      {{- toYaml . | nindent 6 }}
+      {{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: provisioner
+  labels:
+    {{- include "platform.labels" . | nindent 4 }}
+    app.kubernetes.io/name: provisioner
+spec:
+  # One active instance (it also takes a Postgres advisory lock, so a second would only idle).
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: provisioner
+  template:
+    metadata:
+      labels:
+        {{- include "platform.labels" . | nindent 8 }}
+        app.kubernetes.io/name: provisioner
+    spec:
+      serviceAccountName: provisioner
+      automountServiceAccountToken: true
+      containers:
+        - name: provisioner
+          image: "{{ .Values.provisioner.image.repository }}:{{ .Values.provisioner.image.tag }}"
+          imagePullPolicy: {{ .Values.provisioner.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8081
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef: { fieldPath: metadata.namespace }
+            - name: PGHOST
+              value: postgres
+            - name: PGDATABASE
+              value: {{ .Values.postgres.database }}
+            - name: PGUSER
+              value: {{ .Values.postgres.user }}
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ .Values.postgres.secretName }}, key: password }
+            - name: ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef: { name: {{ .Values.gateway.secretName }}, key: encryption-key }
+            - name: HOSTED_NAMESPACE
+              value: {{ .Values.provisioner.hostedNamespace | quote }}
+            - name: GATEWAY_NAMESPACE
+              value: {{ .Release.Namespace | quote }}
+            - name: PROVISION_TIMEOUT_MIN
+              value: {{ .Values.provisioner.provisionTimeoutMinutes | quote }}
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.provisioner.resources | nindent 12 }}
+          securityContext:
+            runAsUser: 1000
+            {{- include "platform.containerSecurityContext" . | nindent 12 }}
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+            - { name: store-values, mountPath: /config, readOnly: true }
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: store-values
+          configMap:
+            name: provisioner-store-values
+{{- end }}

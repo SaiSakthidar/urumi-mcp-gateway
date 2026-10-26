@@ -73,9 +73,45 @@ Not mitigated: a model that obeys a sufficiently clever injection within the per
 ## Other controls
 
 - **Network:** woo-mcp is ClusterIP-only with no Ingress. A NetworkPolicy admits only gateway pods, and woo-mcp also requires a bearer token. MariaDB and Postgres accept only their single client. Every namespace is default-deny.
-- **Pods:** our containers are non-root, read-only root filesystem, all capabilities dropped, `RuntimeDefault` seccomp, and no service-account token (nothing talks to the Kubernetes API).
+- **Pods:** our containers are non-root, read-only root filesystem, all capabilities dropped, `RuntimeDefault` seccomp, and no service-account token. The one exception is the provisioner (see below).
+- **Rate limits:** every tool call is counted per API key (per user for chat) in one-minute windows in Postgres, so a runaway client or a prompt-injected agent loop is cut off at 120 calls a minute by default, across all gateway replicas. Rejected calls are audited as `rate_limited`.
 - **Secrets:** nothing secret in git or values files; Kubernetes Secrets are created out-of-band.
+
+## OAuth for MCP clients
+
+The gateway is its own OAuth authorization server (authorization code + PKCE S256, public clients, refresh-token rotation).
+
+- **Redirect URIs** must match the registered value exactly, and registration only accepts https or loopback http. An open redirect here would leak authorization codes.
+- **PKCE is mandatory,** so a stolen authorization code is useless without the verifier that only the client holds.
+- **Codes** are single-use and live five minutes; **access tokens** one hour; **refresh tokens** rotate on every use. Only sha256 of each is stored, like API keys.
+- **The login form** is served by the gateway itself, cannot be framed (`X-Frame-Options: DENY`), and throttles password guesses per client address. It checks credentials directly rather than relying on the dashboard cookie, which is `SameSite=Strict` and would not be sent on a cross-site redirect.
+- **Disabling a user** stops their OAuth tokens immediately: they are checked against the user's status on every request.
+- **Residual risk:** dynamic client registration is open (needed for clients to self-register), so a malicious site can register a client named like a trusted app. The consent page names the client and the user must still enter their own password; a user who approves a lookalike hands it their tool access.
+
+## Hosted MCP servers (admin adds a container image)
+
+This lets an admin run arbitrary code in the cluster, so it is the most dangerous feature and is constrained in layers:
+
+- **Image allowlist:** registry must be on `hostedImageRegistries`, and the image must be pinned to a tag other than `latest` or to a digest.
+- **Pod:** non-root, read-only root filesystem, no capabilities, `RuntimeDefault` seccomp, no service-account token, CPU and memory limits. The hosted namespace enforces the Kubernetes `restricted` Pod Security level, so a pod that tries to be privileged is refused.
+- **Network:** default-deny namespace; each server accepts traffic only from the gateway pods and has egress to DNS only, unless the admin ticks "allow internet", and then only to public addresses on 80/443. A hosted server cannot reach Postgres, the store, other hosted servers or the Kubernetes API.
+- **Secrets:** its environment variables are encrypted in Postgres and exist in the cluster as one Secret that only that pod mounts.
+- **It is still an untrusted upstream** for prompt-injection purposes (see above).
+
+Not mitigated: an image that is malicious but passes the allowlist can abuse whatever the admin gave it (its env vars, internet access, CPU quota). Only admins can add one.
+
+## Store provisioning and the provisioner's privileges
+
+Provisioning needs Kubernetes API access. That power is **not** given to the gateway, which takes user input and talks to an LLM. A separate `provisioner` Deployment holds it, and the gateway only writes rows (what should exist) to Postgres.
+
+- The provisioner has no ingress and egress only to Postgres, DNS and the API server.
+- Its ClusterRole can manage namespaces and RoleBindings and may **bind only one role** (`urumi-store-admin`, enforced with `resourceNames` on the `bind` verb). That role is namespaced and covers only what a store or hosted server needs. It never gets cluster-wide access to Secrets.
+- It deletes only namespaces labelled as a store's, refusing anything else.
+- Users can create stores, but a per-user cap, a cluster-wide cap, a per-namespace ResourceQuota and LimitRange, and a provisioning timeout bound what one user can consume.
+- Each store namespace is default-deny: its MCP server reaches only its own WordPress, WordPress reaches only its own MariaDB, and nothing in one store can reach another store's database or WordPress.
+
+**Residual risk, stated plainly:** RBAC cannot restrict `create rolebindings` to particular namespaces, so a compromised provisioner could bind `urumi-store-admin` in `kube-system` and read its Secrets. Mitigations are that the provisioner is not reachable by anything, runs non-root with a read-only filesystem, and its code only touches namespaces it created. A hardened production setup would run it with an admission policy (for example Kyverno or ValidatingAdmissionPolicy) that restricts which namespaces it may bind in.
 
 ## Out of scope
 
-Denial of service and rate limiting, a compromised Kubernetes node or cluster admin, supply-chain attacks on base images, and WordPress plugin vulnerabilities.
+Denial of service beyond the per-key rate limit, a compromised Kubernetes node or cluster admin, supply-chain attacks on base images, and WordPress plugin vulnerabilities.

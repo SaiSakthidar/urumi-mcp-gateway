@@ -8,7 +8,8 @@ ports:
   websecure:
     hostPort: 443
 service:
-  type: ClusterIP
+  spec:
+    type: ClusterIP
 nodeSelector:
   ingress-ready: "true"
 tolerations:

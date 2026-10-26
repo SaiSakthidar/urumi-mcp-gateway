@@ -1,0 +1,183 @@
+---
+# Builds a single-node k3s server and deploys Urumi on it with the same Helm charts as local.
+#   ansible-playbook site.yml                 (after `terraform apply`; see ../README.md)
+#
+# Images are built on the server and imported straight into k3s, so no registry or pull
+# credentials are needed. Re-running is safe: every step is idempotent or guarded.
+- name: Urumi on k3s
+  hosts: k3s
+  become: true
+  vars:
+    public_ip: "{{ inventory_hostname }}"
+    repo_src: "{{ playbook_dir }}/../.."
+    repo_dest: /opt/urumi
+    helm_version: v3.18.4
+    enable_tls: false          # true: cert-manager + Let's Encrypt (needs web_cidrs open to the world)
+    acme_email: ""             # required when enable_tls is true
+    gateway_replicas: 1
+    local_env_file: "{{ playbook_dir }}/../../.secrets/local.env"
+    images: [woo-mcp, gateway, dashboard, everything-mcp, provisioner]
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+  pre_tasks:
+    - name: Refuse to enable TLS without an email
+      ansible.builtin.assert:
+        that: not enable_tls or acme_email | length > 0
+        fail_msg: "Set acme_email (-e acme_email=you@example.com) when enable_tls is true"
+
+  tasks:
+    - name: Base packages
+      ansible.builtin.apt:
+        name: [curl, ca-certificates, git, make, rsync, openssl, jq, docker.io]
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Docker is running (used only to build images)
+      ansible.builtin.service:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Install k3s
+      ansible.builtin.shell: |
+        set -o pipefail
+        curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="server --tls-san {{ public_ip }} --write-kubeconfig-mode 644" sh -
+      args:
+        executable: /bin/bash
+        creates: /usr/local/bin/k3s
+
+    - name: Wait for the node to be Ready
+      ansible.builtin.command: kubectl wait --for=condition=Ready node --all --timeout=180s
+      changed_when: false
+
+    - name: Install Helm
+      ansible.builtin.shell: |
+        set -o pipefail
+        curl -fsSL https://get.helm.sh/helm-{{ helm_version }}-linux-amd64.tar.gz | tar -xz -C /tmp
+        install -m 0755 /tmp/linux-amd64/helm /usr/local/bin/helm
+      args:
+        executable: /bin/bash
+        creates: /usr/local/bin/helm
+
+    - name: Copy the repository to the server
+      ansible.posix.synchronize:
+        src: "{{ repo_src }}/"
+        dest: "{{ repo_dest }}/"
+        delete: false
+        rsync_opts:
+          - "--exclude=.git"
+          - "--exclude=node_modules"
+          - "--exclude=dist"
+          - "--exclude=.secrets"
+          - "--exclude=graphify-out"
+          - "--exclude=infra/terraform/.terraform"
+          - "--exclude=*.tfstate*"
+          - "--exclude=*.pdf"
+        # Written as root because /opt is root's; rsync itself still runs from the controller over SSH.
+        rsync_path: "sudo rsync"
+      become: false
+
+    - name: Make the copy owned by root (it is built and deployed as root)
+      ansible.builtin.file:
+        path: "{{ repo_dest }}"
+        owner: root
+        group: root
+        recurse: true
+
+    - name: Read the LLM key from the local secrets file (never printed)
+      ansible.builtin.set_fact:
+        llm_api_key: "{{ (lookup('ansible.builtin.file', local_env_file, errors='ignore') | default('') | regex_search('(?m)^LLM_API_KEY=(.*)$', '\\1') | default([''], true))[0] }}"
+      no_log: true
+      delegate_to: localhost
+      become: false
+
+    - name: Directory for the server's secrets (root only)
+      ansible.builtin.file:
+        path: "{{ repo_dest }}/.secrets"
+        state: directory
+        mode: "0700"
+
+    - name: Seed the server's secrets file with the LLM key (every other secret is generated on the server)
+      ansible.builtin.copy:
+        dest: "{{ repo_dest }}/.secrets/aws.env"
+        content: "LLM_API_KEY={{ llm_api_key }}\n"
+        mode: "0600"
+        force: false     # never overwrite: it later holds generated passwords that must stay stable
+      no_log: true
+
+    - name: Render the AWS values files
+      ansible.builtin.template:
+        src: "{{ item.src }}"
+        dest: "{{ repo_dest }}/charts/{{ item.chart }}/values-aws.yaml"
+        mode: "0644"
+      loop:
+        - { src: store-values.yaml.j2, chart: store }
+        - { src: mcp-values.yaml.j2, chart: mcp-servers }
+        - { src: platform-values.yaml.j2, chart: platform }
+
+    - name: Build the images (first run takes a few minutes)
+      ansible.builtin.shell: |
+        set -o pipefail
+        cd {{ repo_dest }}
+        if [ "{{ item }}" = provisioner ]; then
+          docker build -q -f apps/provisioner/Dockerfile -t urumi/{{ item }}:dev .
+        else
+          docker build -q -t urumi/{{ item }}:dev apps/{{ item }}
+        fi
+        docker save urumi/{{ item }}:dev | k3s ctr -n k8s.io images import -
+      args:
+        executable: /bin/bash
+      loop: "{{ images }}"
+      async: 1500
+      poll: 10
+      changed_when: true
+
+    - name: Create namespaces and Secrets
+      ansible.builtin.command: make secrets ENV=aws
+      args:
+        chdir: "{{ repo_dest }}"
+      changed_when: true
+
+    - name: Install cert-manager (TLS only)
+      when: enable_tls
+      block:
+        - ansible.builtin.shell: |
+            helm repo add jetstack https://charts.jetstack.io && helm repo update jetstack
+            helm upgrade --install cert-manager jetstack/cert-manager -n cert-manager --create-namespace --set crds.enabled=true --wait
+          args: { executable: /bin/bash }
+        - ansible.builtin.shell: >
+            sed 's/you@example.com/{{ acme_email }}/' {{ repo_dest }}/deploy/cert-manager/cluster-issuer.yaml | kubectl apply -f -
+          args: { executable: /bin/bash }
+
+    - name: Deploy the three Helm releases (the store goes first because its setup Job downloads WooCommerce)
+      ansible.builtin.command: make deploy ENV=aws
+      args:
+        chdir: "{{ repo_dest }}"
+      async: 1800
+      poll: 15
+      changed_when: true
+
+    # Images are rebuilt under the same :dev tag and imported straight into containerd, so Helm sees no
+    # change and would leave old pods running old code. Restarting picks up the new images.
+    - name: Restart workloads so they run the freshly built images
+      ansible.builtin.command: kubectl rollout restart deploy/{{ item.name }} -n {{ item.ns }}
+      loop:
+        - { ns: platform, name: gateway }
+        - { ns: platform, name: dashboard }
+        - { ns: platform, name: provisioner }
+        - { ns: mcp, name: woo-mcp }
+        - { ns: mcp, name: everything-mcp }
+      changed_when: true
+
+    - name: Wait for the platform workloads to be ready
+      ansible.builtin.command: kubectl -n platform rollout status deploy/{{ item }} --timeout=300s
+      loop: [gateway, dashboard, provisioner]
+      changed_when: false
+
+    - name: Where to look
+      ansible.builtin.debug:
+        msg:
+          - "Dashboard:  http{{ 's' if enable_tls else '' }}://app.{{ public_ip }}.sslip.io"
+          - "Storefront: http{{ 's' if enable_tls else '' }}://shop.{{ public_ip }}.sslip.io"
+          - "Admin password: ssh in and run: grep BOOTSTRAP_ADMIN_PASSWORD {{ repo_dest }}/.secrets/aws.env"

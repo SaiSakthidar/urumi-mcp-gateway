@@ -3,6 +3,8 @@
 # Dashboard + gateway are served at app.<domain> (/ → dashboard, /api and /mcp → gateway).
 domain: 127.0.0.1.sslip.io
 scheme: http
+# Only set when the ingress is not on the default port for the scheme (e.g. 8080 when port 80 is taken locally).
+port: ""
 
 ingress:
   className: traefik
@@ -23,6 +25,8 @@ networkPolicy:
     podLabels:
       app.kubernetes.io/name: traefik
   mcpNamespace: mcp
+  # Where the provisioner may reach the Kubernetes API server (ports 6443 and 443).
+  apiServerCidr: 0.0.0.0/0
 
 gateway:
   image:
@@ -34,7 +38,18 @@ gateway:
   secretName: gateway
   bootstrapAdminEmail: admin@urumi.local
   seedWooMcpUrl: http://woo-mcp.mcp.svc.cluster.local:3000/mcp
+  # >1 for high availability; safe because state is in Postgres (see templates/gateway.yaml).
+  replicas: 1
   upstreamCallTimeoutMs: 15000
+  # Calls per minute per API key (per user for chat). 0 = unlimited.
+  rateLimitPerMinute: 120
+  # With more visible tools than this, the chat agent uses search_tools + run_tool.
+  toolSearchThreshold: 30
+  # Hosted MCP servers may only be pulled from these registries ("*" allows any).
+  hostedImageRegistries: [docker.io, ghcr.io, quay.io, mcr.microsoft.com]
+  # Store provisioning caps.
+  maxStoresPerUser: 2
+  maxStoresTotal: 6
   # Our own in-cluster MCP servers; every other cluster-internal or private
   # address is rejected as an upstream URL (SSRF guard).
   allowedInternalHosts:
@@ -46,10 +61,30 @@ gateway:
   llm:
     # Any OpenAI-compatible chat completions endpoint.
     baseUrl: https://generativelanguage.googleapis.com/v1beta/openai/
-    model: gemini-2.5-flash   # any tool-calling model the provider offers
+    model: gemini-flash-lite-latest   # any tool-calling model the provider offers
   resources:
     requests: { cpu: 100m, memory: 128Mi }
     limits: { cpu: 1000m, memory: 384Mi }
+
+provisioner:
+  enabled: true
+  image:
+    repository: urumi/provisioner
+    tag: dev
+    pullPolicy: IfNotPresent
+  # Hosted MCP servers run here. Created and locked down (default-deny, restricted pod security) by the provisioner.
+  hostedNamespace: mcp-hosted
+  provisionTimeoutMinutes: 15
+  # The WooCommerce MCP server image each provisioned store runs.
+  wooMcpImage:
+    repository: urumi/woo-mcp
+    tag: dev
+    pullPolicy: IfNotPresent
+  # Overrides for the per-store ResourceQuota (see charts/store/values.yaml for the defaults).
+  storeQuota: {}
+  resources:
+    requests: { cpu: 50m, memory: 96Mi }
+    limits: { cpu: 500m, memory: 384Mi }
 
 dashboard:
   image:

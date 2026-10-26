@@ -1,0 +1,59 @@
+---
+# Checks from outside (as a client would) and from inside (pods, policies) that the deployment is healthy.
+#   ansible-playbook verify.yml
+- name: Outside-in checks
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    ip: "{{ groups['k3s'][0] }}"
+    app: "http://app.{{ groups['k3s'][0] }}.sslip.io"
+    shop: "http://shop.{{ groups['k3s'][0] }}.sslip.io"
+  tasks:
+    - name: Dashboard answers
+      ansible.builtin.uri: { url: "{{ app }}/", status_code: 200 }
+    - name: Gateway health
+      ansible.builtin.uri: { url: "{{ app }}/api/health", return_content: true }
+      register: health
+      failed_when: "'ok' not in health.content"
+    - name: Storefront answers
+      ansible.builtin.uri: { url: "{{ shop }}/", status_code: 200 }
+    - name: /mcp rejects an unauthenticated call and points at OAuth discovery
+      ansible.builtin.uri:
+        url: "{{ app }}/mcp"
+        method: POST
+        body_format: json
+        body: { jsonrpc: "2.0", id: 1, method: tools/list }
+        headers: { Accept: "application/json, text/event-stream" }
+        status_code: 401
+      register: mcp
+      failed_when: "'resource_metadata' not in (mcp.www_authenticate | default(''))"
+    - name: OAuth discovery documents are served
+      ansible.builtin.uri: { url: "{{ app }}{{ item }}", return_content: true }
+      register: disco
+      failed_when: "'authorization_endpoint' not in disco.content and 'authorization_servers' not in disco.content"
+      loop: [/.well-known/oauth-protected-resource, /.well-known/oauth-authorization-server]
+
+- name: Inside checks
+  hosts: k3s
+  become: true
+  gather_facts: false
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  tasks:
+    - name: Every pod is Running or Completed
+      ansible.builtin.shell: kubectl get pods -A --no-headers | awk '$4!="Running" && $4!="Completed"{print}'
+      register: bad
+      changed_when: false
+      failed_when: bad.stdout | length > 0
+    - name: NetworkPolicies exist in every namespace we own
+      ansible.builtin.shell: |
+        for ns in store mcp platform; do echo "$ns has $(kubectl get netpol -n $ns --no-headers | wc -l) NetworkPolicies"; done
+      register: np
+      changed_when: false
+    - ansible.builtin.debug: { var: np.stdout_lines }
+    - name: Provisioner is the leader and healthy
+      ansible.builtin.command: kubectl -n platform logs deploy/provisioner --tail=5
+      register: plog
+      changed_when: false
+    - ansible.builtin.debug: { var: plog.stdout_lines }

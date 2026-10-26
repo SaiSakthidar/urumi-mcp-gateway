@@ -69,7 +69,12 @@ export class UpstreamManager {
 
   async start(): Promise<void> {
     await this.reload();
-    this.timer = setInterval(() => void this.checkAll(), config.healthPollIntervalMs);
+    // reload() re-reads the registry, so servers the provisioner registers (stores, hosted
+    // servers) and changes made through another gateway replica show up without a restart.
+    this.timer = setInterval(
+      () => void this.reload().catch((err: unknown) => console.error("registry reload failed", err)),
+      config.healthPollIntervalMs,
+    );
   }
 
   async stop(): Promise<void> {
@@ -195,7 +200,9 @@ export class UpstreamManager {
 
   private async connect(cfg: UpstreamConfig): Promise<Client> {
     // Re-checked on every connect: the name may resolve somewhere else since it was saved.
-    await assertSafeUpstreamUrl(cfg.url);
+    // Hosted and store servers live inside the cluster by design and their URL is generated
+    // by the platform, never typed by a user, so only remote URLs go through the SSRF guard.
+    if (cfg.kind === "remote") await assertSafeUpstreamUrl(cfg.url);
     const client = new Client({ name: "urumi-gateway", version: "0.1.0" });
     // The decrypted credential is injected here, per upstream. It never leaves this process.
     const transport = new StreamableHTTPClientTransport(new URL(cfg.url), {

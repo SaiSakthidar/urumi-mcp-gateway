@@ -4,13 +4,19 @@ import { principalOf, requireAdmin, requireUser } from "../auth/sessions.js";
 import { exposedToolName } from "../core/catalog.js";
 import { assertSafeUpstreamUrl, SsrfError } from "../security/ssrf.js";
 import { upstreams } from "../upstreams/manager.js";
+import { assertAllowedImage, ImageError } from "../security/image.js";
 import {
+  createHostedUpstream,
   createUpstream,
   deleteUpstream,
+  hostedStatusByUpstream,
   listUpstreamRows,
+  markHostedDeleting,
   updateUpstream,
+  type HostedStatus,
   type UpstreamRow,
 } from "../upstreams/registry.js";
+import { config } from "../config.js";
 import { HttpError, idParam, isUniqueViolation, parseBody } from "./http.js";
 
 // Upstream MCP servers. Everyone can see servers, their status and tools;
@@ -69,7 +75,7 @@ async function checkUrl(url: string): Promise<void> {
   }
 }
 
-function view(row: UpstreamRow, isAdmin: boolean) {
+function view(row: UpstreamRow, isAdmin: boolean, hosted?: HostedStatus) {
   const state = upstreams.get(row.slug);
   return {
     id: row.id,
@@ -81,6 +87,15 @@ function view(row: UpstreamRow, isAdmin: boolean) {
     authHeaderName: row.auth_header_name,
     hasCredential: row.credential_ciphertext !== null,
     enabled: row.enabled,
+    kind: row.kind,
+    // Hosted servers: where they run and whether the provisioner has got them running yet.
+    hosted: hosted && {
+      image: hosted.image,
+      port: hosted.port,
+      deployStatus: hosted.status,
+      deployDetail: hosted.status_detail,
+      allowInternet: hosted.allow_internet,
+    },
     status: state?.status ?? (row.enabled ? "connecting" : "disabled"),
     lastError: state?.lastError ?? null,
     lastCheckedAt: state?.lastCheckedAt ?? null,
@@ -93,8 +108,8 @@ function view(row: UpstreamRow, isAdmin: boolean) {
 
 serversRouter.get("/", async (_req, res) => {
   const isAdmin = principalOf(res).role === "admin";
-  const rows = await listUpstreamRows();
-  res.json(rows.map((row) => view(row, isAdmin)));
+  const [rows, hosted] = await Promise.all([listUpstreamRows(), hostedStatusByUpstream()]);
+  res.json(rows.map((row) => view(row, isAdmin, hosted.get(row.id))));
 });
 
 serversRouter.post("/", requireAdmin, async (req, res) => {
@@ -110,10 +125,54 @@ serversRouter.post("/", requireAdmin, async (req, res) => {
   }
 });
 
+// ---- Hosted servers: the admin gives a container image, the provisioner runs it. ----
+
+const hostedSchema = z.object({
+  slug: z.string().regex(/^[a-z0-9-]{1,16}$/, "Lowercase letters, digits and dashes, max 16 characters"),
+  displayName: z.string().trim().min(1).max(64),
+  image: z.string().trim().min(1).max(255),
+  port: z.number().int().min(1024).max(65535).default(3000),
+  // Env vars for the container (e.g. API tokens). Stored encrypted, never returned by the API.
+  env: z.record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/, "Invalid variable name"), z.string().max(4096)).default({}),
+  // Egress is blocked unless the server needs to reach the internet (e.g. a SaaS API).
+  allowInternet: z.boolean().default(false),
+});
+
+serversRouter.post("/hosted", requireAdmin, async (req, res) => {
+  const input = parseBody(hostedSchema, req.body);
+  try {
+    assertAllowedImage(input.image);
+  } catch (err) {
+    if (err instanceof ImageError) throw new HttpError(400, `Image rejected: ${err.message}`);
+    throw err;
+  }
+  try {
+    const id = await createHostedUpstream(
+      {
+        slug: input.slug,
+        displayName: input.displayName,
+        // In-cluster Service created by the provisioner (hs-<slug> in the hosted namespace).
+        url: `http://hs-${input.slug}.${config.hostedNamespace}.svc.cluster.local:${input.port}/mcp`,
+        hosted: { image: input.image, port: input.port, env: input.env, allowInternet: input.allowInternet },
+      },
+      principalOf(res).userId,
+    );
+    await upstreams.reload();
+    res.status(202).json({ id });
+  } catch (err) {
+    if (isUniqueViolation(err)) throw new HttpError(409, `A server with slug "${input.slug}" already exists`);
+    throw err;
+  }
+});
+
 serversRouter.patch("/:id", requireAdmin, async (req, res) => {
   const patch = parseBody(patchSchema, req.body);
   if (patch.authType === "header" && patch.authHeaderName === undefined) {
     throw new HttpError(400, "authHeaderName: required for header auth");
+  }
+  const target = (await listUpstreamRows()).find((r) => r.id === idParam(req));
+  if (target && target.kind !== "remote" && (patch.url !== undefined || patch.authType !== undefined || patch.credential !== undefined)) {
+    throw new HttpError(400, "The URL and credentials of hosted and store servers are managed by the platform");
   }
   if (patch.url !== undefined) await checkUrl(patch.url);
   if (!(await updateUpstream(idParam(req), patch))) throw new HttpError(404, "Server not found");
@@ -122,7 +181,17 @@ serversRouter.patch("/:id", requireAdmin, async (req, res) => {
 });
 
 serversRouter.delete("/:id", requireAdmin, async (req, res) => {
-  if (!(await deleteUpstream(idParam(req)))) throw new HttpError(404, "Server not found");
+  const id = idParam(req);
+  const row = (await listUpstreamRows()).find((r) => r.id === id);
+  if (row?.kind === "store") throw new HttpError(400, "This server belongs to a store. Delete the store instead.");
+  if (row?.kind === "hosted") {
+    // The provisioner removes the Deployment, Secret and NetworkPolicy, then the row.
+    await markHostedDeleting(id);
+    await upstreams.reload();
+    res.status(202).json({ ok: true });
+    return;
+  }
+  if (!(await deleteUpstream(id))) throw new HttpError(404, "Server not found");
   await upstreams.reload();
   res.json({ ok: true });
 });

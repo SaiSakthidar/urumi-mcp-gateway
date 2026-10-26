@@ -5,6 +5,8 @@ import { decrypt, encrypt } from "../security/crypto.js";
 // and only ever decrypted into request headers inside the gateway process.
 
 export type AuthType = "none" | "bearer" | "header";
+// remote: registered by URL | hosted: deployed from an image | store: a provisioned store's MCP server
+export type UpstreamKind = "remote" | "hosted" | "store";
 
 export type UpstreamRow = {
   id: number;
@@ -16,6 +18,7 @@ export type UpstreamRow = {
   credential_ciphertext: Buffer | null;
   credential_iv: Buffer | null;
   enabled: boolean;
+  kind: UpstreamKind;
   created_at: Date;
   updated_at: Date;
 };
@@ -27,7 +30,16 @@ export interface UpstreamConfig {
   displayName: string;
   url: string;
   enabled: boolean;
+  /** Hosted and store servers are created by the platform itself, not from an admin-typed URL. */
+  kind: UpstreamKind;
   headers: Record<string, string>;
+}
+
+export interface HostedInput {
+  image: string;
+  port: number;
+  env: Record<string, string>;
+  allowInternet: boolean;
 }
 
 export interface UpstreamInput {
@@ -66,6 +78,7 @@ export function toConfig(row: UpstreamRow): UpstreamConfig {
     displayName: row.display_name,
     url: row.url,
     enabled: row.enabled,
+    kind: row.kind,
     headers,
   };
 }
@@ -129,4 +142,49 @@ export async function updateUpstream(id: number, patch: UpstreamPatch): Promise<
 export async function deleteUpstream(id: number): Promise<boolean> {
   const result = await pool.query("DELETE FROM upstreams WHERE id = $1", [id]);
   return result.rowCount === 1;
+}
+
+/** A hosted server: the upstream row plus the desired state the provisioner reconciles. One transaction. */
+export async function createHostedUpstream(
+  input: { slug: string; displayName: string; url: string; hosted: HostedInput },
+  createdBy: number,
+): Promise<number> {
+  const env = Object.keys(input.hosted.env).length ? encrypt(JSON.stringify(input.hosted.env)) : null;
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query<{ id: number }>(
+      `INSERT INTO upstreams (slug, display_name, url, auth_type, enabled, kind, created_by)
+       VALUES ($1, $2, $3, 'none', true, 'hosted', $4) RETURNING id`,
+      [input.slug, input.displayName, input.url, createdBy],
+    );
+    await client.query(
+      `INSERT INTO hosted_servers (upstream_id, image, port, env_ciphertext, env_iv, allow_internet)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [rows[0].id, input.hosted.image, input.hosted.port, env?.ciphertext ?? null, env?.iv ?? null, input.hosted.allowInternet],
+    );
+    await client.query("COMMIT");
+    return rows[0].id;
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+export type HostedStatus = { image: string; port: number; status: string; status_detail: string | null; allow_internet: boolean };
+
+export async function hostedStatusByUpstream(): Promise<Map<number, HostedStatus>> {
+  const { rows } = await pool.query<HostedStatus & { upstream_id: number }>(
+    "SELECT upstream_id, image, port, status, status_detail, allow_internet FROM hosted_servers",
+  );
+  return new Map(rows.map((r) => [r.upstream_id, r]));
+}
+
+/** Hosted servers are removed by the provisioner once their Kubernetes resources are gone. */
+export async function markHostedDeleting(id: number): Promise<boolean> {
+  const { rowCount } = await pool.query("UPDATE hosted_servers SET status = 'deleting', updated_at = now() WHERE upstream_id = $1", [id]);
+  if (rowCount) await pool.query("UPDATE upstreams SET enabled = false, updated_at = now() WHERE id = $1", [id]);
+  return rowCount === 1;
 }

@@ -32,3 +32,15 @@ User A = admin, user B = member.
 - Why aren't client tokens forwarded to upstreams?
 - What happens if an admin adds a malicious MCP server?
 - What changes between kind and k3s?
+
+## Bonus segments (add after segment 13 if time allows)
+
+| # | Segment | What to show | Commands / clicks |
+|---|---|---|---|
+| 14 | OAuth (1.5 min) | Connect Claude Code with only the URL: `/mcp` → Authenticate → browser login → Allow → tools appear. Mention PKCE and that API keys still work | `claude mcp add --transport http urumi <url>` |
+| 15 | Many tools (1 min) | Same URL with `?tools=search`: only `search_tools` and `run_tool`. Ask for "orders", then run the tool; show both in the audit log | client + Audit page |
+| 16 | Rate limit + metrics (1.5 min) | Lower `gateway.rateLimitPerMinute` to 5, fire 8 calls, see `rate_limited` rows; open Metrics (error rate, p95); `curl /metrics` through a port-forward | `helm upgrade ... --set gateway.rateLimitPerMinute=5` |
+| 17 | Scaling (1.5 min) | `--set gateway.replicas=2`; keep a client calling; `kubectl delete pod` one gateway; calls keep working, both pods in the audit log | `kubectl get pods -l app.kubernetes.io/name=gateway -w` |
+| 18 | Multi-store (4 min) | Stores → create `acme` (shows Provisioning → Ready), place an order there; ask chat "compare today's orders across woo and acme"; show the isolation `exec` test; kill the provisioner pod mid-install and show it resume; delete the store and show `kubectl get ns` and its tools are gone | Stores page + terminal |
+| 19 | Hosted server (1.5 min) | Servers → Host from image (e.g. an MCP reference server image, pinned tag) → Running → its tools appear → show its NetworkPolicy and the rejected `:latest` and disallowed registry | Servers page + `kubectl -n mcp-hosted get all,netpol` |
+| 20 | Upgrade and rollback (1 min) | `make upgrade-demo` | terminal |

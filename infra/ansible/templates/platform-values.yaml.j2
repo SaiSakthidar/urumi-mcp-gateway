@@ -1,0 +1,23 @@
+domain: "{{ public_ip }}.sslip.io"
+scheme: {{ 'https' if enable_tls else 'http' }}
+ingress:
+  tls:
+    enabled: {{ enable_tls | lower }}
+    clusterIssuer: "{{ 'letsencrypt-prod' if enable_tls else '' }}"
+persistence:
+  storageClass: local-path
+networkPolicy:
+  ingressController:
+    namespace: kube-system
+gateway:
+  replicas: {{ gateway_replicas }}
+  image:
+    pullPolicy: Never
+dashboard:
+  image:
+    pullPolicy: Never
+provisioner:
+  image:
+    pullPolicy: Never
+  wooMcpImage:
+    pullPolicy: Never

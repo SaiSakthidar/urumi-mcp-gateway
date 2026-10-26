@@ -6,7 +6,9 @@ There are three Helm releases, one per namespace, so each layer upgrades and rol
 |---|---|---|
 | `store` | `store` | WordPress, MariaDB, setup Job |
 | `mcp` | `mcp` | woo-mcp, server-everything |
-| `platform` | `platform` | gateway, dashboard, Postgres |
+| `platform` | `platform` | gateway, dashboard, Postgres, provisioner |
+
+Provisioned stores are additional Helm releases (`store` in namespace `store-<id>`), installed and removed by the provisioner, not by hand. Hosted MCP servers are plain Deployments in `mcp-hosted`, also managed by the provisioner.
 
 ## Upgrade
 
@@ -42,6 +44,35 @@ Rollback restores the previous manifests (image tags, config). It does not touch
 - PVCs are not part of the rollback. The WordPress PVC has `helm.sh/resource-policy: keep`, and StatefulSet volume claims are never deleted by Helm.
 - Database migrations are not reverted. Additive migrations are what make this safe.
 
+## Try it: upgrade and roll back
+
+```bash
+make upgrade-demo      # ./scripts/upgrade-demo.sh
+```
+
+It prints the kubectl context and asks before doing anything, then upgrades the `platform` release (rate limit 120 → 240), waits for the rollout, shows the running value, rolls back to the previous revision, and prints `helm history`. Rollback restores manifests only; no data changes.
+
+Check production values without a cluster (renders and lints all three charts and asserts TLS, NetworkPolicies and no `pullPolicy: Never`):
+
+```bash
+make lint-prod
+```
+
+## Scaling the gateway
+
+```bash
+helm upgrade platform charts/platform -n platform -f charts/platform/values-<env>.yaml --set gateway.replicas=2
+kubectl -n platform get pods -l app.kubernetes.io/name=gateway -o wide
+```
+
+To see it hold up: call `/mcp` repeatedly (each request may hit a different pod), `kubectl delete pod` one gateway pod while a client keeps calling, and check the Metrics page and the audit log: calls keep succeeding and are all recorded. The rate limit is shared: two clients on the same API key count against the same window.
+
+## Provisioner
+
+- **Restart safely:** `kubectl -n platform rollout restart deploy/provisioner` at any time, including mid-install; stores in `provisioning` resume.
+- **Stuck or failed store:** the dashboard shows the reason. Delete the store (or Retry), or inspect with `kubectl -n store-<id> get pods,events` and `kubectl -n platform logs deploy/provisioner`.
+- **Upgrading it** is a normal `helm upgrade` of `platform`. The store chart is baked into the provisioner image, so a new store chart version needs a new provisioner image (`make push`), and existing stores keep the version they were installed with until you upgrade them (`helm upgrade store <chart> -n store-<id>`, with the values in `kubectl -n platform get cm provisioner-store-values`).
+
 ## Backups
 
 ```bash
@@ -55,6 +86,7 @@ Also back up `.secrets/<env>.env`. Without `GATEWAY_ENCRYPTION_KEY`, stored upst
 
 ## Rotating secrets
 
+- **Gateway encryption key** (`GATEWAY_ENCRYPTION_KEY`) is used by both the gateway and the provisioner. Rotating it means re-entering upstream credentials and hosted-server environment variables.
 - **Upstream credential:** edit the server in the dashboard and paste the new value. The gateway reconnects immediately.
 - **API key:** revoke it in the dashboard and generate a new one.
 - **woo-mcp token / WooCommerce API key:** change the values in `.secrets/<env>.env`, run `make secrets`, then `helm upgrade` the `store` release (the setup Job syncs the WooCommerce key). Restart woo-mcp (`kubectl rollout restart deploy/woo-mcp -n mcp`), and update the `woo` server's credential in the dashboard.

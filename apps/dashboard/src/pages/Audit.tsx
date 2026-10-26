@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useApi } from "../api";
 import type { AuditRow, Me, Member, Server } from "../types";
 
-const OUTCOMES = ["ok", "tool_error", "timeout", "unreachable", "disabled", "not_found", "error", "denied", "auth_revoked"];
+const OUTCOMES = ["ok", "tool_error", "timeout", "unreachable", "disabled", "not_found", "error", "denied", "auth_revoked", "rate_limited"];
 
 export function AuditPage({ me }: { me: Me }) {
   const isAdmin = me.role === "admin";

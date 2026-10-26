@@ -46,7 +46,8 @@ spec:
             - name: WC_BASE_URL
               value: {{ .Values.wooMcp.store.baseUrl | quote }}
             - name: WC_PUBLIC_HOST
-              value: {{ .Values.wooMcp.store.publicHost | quote }}
+              # Host header and OAuth signature host: must equal the store's WP_HOME host exactly, port included.
+              value: "{{ .Values.wooMcp.store.publicHost }}{{ if .Values.wooMcp.store.publicPort }}:{{ .Values.wooMcp.store.publicPort }}{{ end }}"
             - name: STORE_TIMEZONE
               value: {{ .Values.wooMcp.store.timezone | quote }}
             - name: WC_CONSUMER_KEY

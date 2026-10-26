@@ -1,0 +1,8 @@
+wooMcp:
+  image:
+    pullPolicy: Never        # built on this server and imported into k3s
+  store:
+    publicHost: "shop.{{ public_ip }}.sslip.io"
+everything:
+  image:
+    pullPolicy: Never

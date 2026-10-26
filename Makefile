@@ -5,9 +5,11 @@
 ENV        ?= local
 CLUSTER    ?= urumi
 TAG        ?= dev
-APPS       := woo-mcp gateway dashboard everything-mcp
+APPS       := woo-mcp gateway dashboard everything-mcp provisioner
+PORT       ?=
+HELM_PORT  := $(if $(PORT),--set port=$(PORT),)
 
-.PHONY: up down cluster secrets build load deploy deploy-store deploy-mcp deploy-platform status lint push history
+.PHONY: up down cluster secrets build load deploy deploy-store deploy-mcp deploy-platform status lint lint-prod push history upgrade-demo
 
 up: cluster secrets build load deploy ## Full local bring-up
 
@@ -20,8 +22,11 @@ down: ## Delete the kind cluster
 secrets: ## Create namespaces + Kubernetes Secrets from .secrets/$(ENV).env
 	./scripts/create-secrets.sh $(ENV)
 
-build: ## Build all images
-	@for app in $(APPS); do docker build -t urumi/$$app:$(TAG) apps/$$app || exit 1; done
+build: ## Build all images (the provisioner bundles the store chart, so it builds from the repo root)
+	@for app in $(APPS); do \
+	  if [ $$app = provisioner ]; then docker build -f apps/provisioner/Dockerfile -t urumi/$$app:$(TAG) . || exit 1; \
+	  else docker build -t urumi/$$app:$(TAG) apps/$$app || exit 1; fi; \
+	done
 
 load: ## Load images into kind
 	@for app in $(APPS); do kind load docker-image urumi/$$app:$(TAG) --name $(CLUSTER) || exit 1; done
@@ -30,13 +35,14 @@ deploy: deploy-store deploy-mcp deploy-platform ## helm upgrade --install all th
 
 deploy-store:
 	# The setup Job (post-install hook) downloads WooCommerce, so allow extra time.
-	helm upgrade --install store charts/store -n store -f charts/store/values-$(ENV).yaml --timeout 15m
+	# PORT=8080 when the ingress is published on another host port (e.g. port 80 is taken locally).
+	helm upgrade --install store charts/store -n store -f charts/store/values-$(ENV).yaml $(HELM_PORT) --timeout 15m
 
 deploy-mcp:
-	helm upgrade --install mcp charts/mcp-servers -n mcp -f charts/mcp-servers/values-$(ENV).yaml
+	helm upgrade --install mcp charts/mcp-servers -n mcp -f charts/mcp-servers/values-$(ENV).yaml $(if $(PORT),--set wooMcp.store.publicPort=$(PORT),)
 
 deploy-platform:
-	helm upgrade --install platform charts/platform -n platform -f charts/platform/values-$(ENV).yaml
+	helm upgrade --install platform charts/platform -n platform -f charts/platform/values-$(ENV).yaml $(HELM_PORT)
 
 push: ## Build multi-arch images and push: make push REGISTRY=ghcr.io/<user> TAG=0.1.0
 	./scripts/build-and-push.sh $(REGISTRY) $(TAG)
@@ -50,6 +56,12 @@ status: ## Show what is running
 	kubectl get pods,svc,ingress,pvc -n store
 	kubectl get pods,svc,networkpolicy -n mcp
 	kubectl get pods,svc,ingress,pvc -n platform
+
+upgrade-demo: ## Upgrade the platform release, verify it, then roll back (see docs/operations.md)
+	./scripts/upgrade-demo.sh
+
+lint-prod: ## Render and lint every chart with the prod values (no cluster needed)
+	./scripts/check-prod.sh
 
 lint: ## helm lint all charts
 	helm lint charts/store -f charts/store/values-$(ENV).yaml

@@ -86,6 +86,53 @@ Every tool is always prefixed, even with no collision. Alternative: prefix only 
 | Ingress | Traefik on kind and k3s | ingress-nginx (retired) | One ingress class in both environments. |
 | LLM | Any OpenAI-compatible endpoint | Provider SDK | Changing provider is a values change. |
 
+## Handling many tools
+
+Ten servers can mean hundreds of tools, too many to hand a model at once. Two meta-tools solve it:
+
+- `search_tools {query}` scores the caller's *permitted* tools by keyword (name matches count more than description matches) and returns names, descriptions and input schemas.
+- `run_tool {name, arguments}` runs one through the same `callTool()` choke point, so routing, permissions, rate limits and the audit entry all apply to the real tool.
+
+An MCP client opts in with `?tools=search` (or the `X-Urumi-Tool-Mode: search` header) and then sees just those two tools. The chat agent switches on its own when a user can see more than `toolSearchThreshold` tools (30 by default). Keyword scoring was chosen over embeddings: no model, no index to keep in sync, and the result is explainable.
+
+## Observability and rate limits
+
+- **`/metrics`** (Prometheus text): calls by server and outcome, a latency histogram per server, rate-limited count, and per-upstream up and tool-count gauges. It is per replica and not routed through the ingress.
+- **Dashboard Metrics page:** calls, error rate, average and p95 latency per server over 24 hours, computed from the audit table, so it is cluster-wide whichever replica answers.
+- **Why a call failed:** the audit row carries the error message, and an unreachable upstream shows its last connection error.
+- **Rate limits:** fixed one-minute windows per API key (per user for chat), counted in Postgres with one atomic upsert. A fixed window allows a burst at a window boundary; a token bucket would be smoother but needs more state. Postgres was chosen so the limit holds across replicas.
+
+## Scaling the gateway
+
+`gateway.replicas: 2` works because nothing that matters lives in a pod:
+
+- MCP is stateless (a new server per POST, no session id), so any replica can take any request and a restart loses nothing. This is the reason sessions were rejected in the first place.
+- Dashboard sessions, OAuth tokens, rate-limit counters and the audit log are in Postgres.
+- Upstream health is per pod: each replica runs its own poller (5 s), so each converges on its own view. The cost is duplicate health checks, and the dashboard may show a status one poll behind depending on which replica answers. The registry reloads on the same poll, so a server added through one replica appears on the others within seconds.
+- Rolling updates keep every pod serving (`maxUnavailable: 0`), a PodDisruptionBudget keeps one up during node drains, and pods spread over nodes by preference.
+
+## OAuth
+
+The gateway is also an OAuth 2.1 authorization server (RFC 8414 metadata, RFC 9728 protected-resource metadata, RFC 7591 dynamic registration, authorization code + PKCE, refresh rotation). An unauthenticated `/mcp` call answers `401` with `WWW-Authenticate: Bearer resource_metadata=...`, which is how a client like Claude Code discovers the login. Both API keys and OAuth access tokens work on `/mcp`: a token that starts with `urumi_` is an API key, anything else is tried as an OAuth token. Both resolve to the same principal and go through the same `callTool()`.
+
+## Provisioner: hosted servers and stores
+
+```
+ dashboard ─► gateway ──writes desired state──► Postgres ◄──reads── provisioner ──► Kubernetes API
+                │                                 (stores,                │            + helm
+                │◄── registry reload (5 s) ───── hosted_servers,          ▼
+                └──────── tool calls ───────────► upstreams)     namespaces, Secrets, Deployments,
+                                                                  NetworkPolicies, store Helm releases
+```
+
+- **Desired state in a table, reconciled by a controller loop** (every 5 s). A provisioner restart in the middle of an install just re-reads the table and continues. Every step is idempotent: Secrets are created once and never overwritten, `helm upgrade --install` converges, and a release left `pending` by a crash is cleared first. This is how "creating a store is safe to retry" and "restart mid-provisioning completes or fails cleanly" are met.
+- **Each store is the same Helm chart** as the main store, in its own namespace, plus its own `woo-mcp` and a ResourceQuota and LimitRange. Its MCP server registers itself in the gateway when the install finishes, with the store's id as the slug, so its tools are `acme__list_orders` and the chat agent can compare stores.
+- **Failure is explicit:** a store that does not finish in `provisionTimeoutMinutes` (15) or whose install fails becomes `failed` with the reason shown in the dashboard, and can be retried or deleted.
+- **Delete** unregisters the tools first, then removes the Helm release and the namespace (which removes volumes and Secrets), and only then the row.
+- **One active provisioner:** a Postgres advisory lock means a second replica idles and takes over if the first dies.
+- **Why a separate component** and not code in the gateway: see the threat model. The gateway never gets Kubernetes API access.
+- **Alternatives considered:** a Kubernetes operator with a CRD (the idiomatic answer, but more machinery and a second source of truth next to Postgres, which already holds the ownership, limits and tool registration); the gateway calling the Kubernetes API directly (rejected on privilege grounds).
+
 ## What changes for production
 
 - **DNS:** `domain` in values. sslip.io needs no DNS setup; a real domain needs an A record for `shop.` and `app.`.

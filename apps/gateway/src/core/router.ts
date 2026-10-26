@@ -1,5 +1,7 @@
 import type { CallToolResult, TextContent } from "@modelcontextprotocol/sdk/types.js";
 import { recordAudit, type Outcome } from "../audit/audit.js";
+import { observeToolCall } from "../metrics/metrics.js";
+import { checkRateLimit } from "./rateLimit.js";
 import type { Principal } from "../auth/principal.js";
 import { describeError, upstreams, UpstreamTimeoutError } from "../upstreams/manager.js";
 import { splitToolName } from "./catalog.js";
@@ -29,6 +31,7 @@ export async function callTool(
   const parts = splitToolName(exposedName);
 
   const finish = async (outcome: Outcome, result: CallToolResult, errorMessage?: string) => {
+    observeToolCall(parts?.slug ?? "gateway", outcome, Date.now() - started);
     await recordAudit({
       userId: principal.userId,
       apiKeyId: principal.apiKeyId ?? null,
@@ -47,6 +50,14 @@ export async function callTool(
     return reject("not_found", `Unknown tool "${exposedName}". Gateway tools are named <server>__<tool>.`);
   }
   const { slug, tool } = parts;
+
+  const limit = await checkRateLimit(principal);
+  if (!limit.ok) {
+    return reject(
+      "rate_limited",
+      `Rate limit of ${limit.limit} calls per minute exceeded. Try again in ${limit.retryAfterSec} s.`,
+    );
+  }
 
   const state = upstreams.get(slug);
   if (!state) return reject("not_found", `Unknown server "${slug}".`);

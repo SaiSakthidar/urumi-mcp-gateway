@@ -47,6 +47,12 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: {{ .Values.networkPolicy.mcpNamespace }}
+    # Hosted MCP servers and provisioned stores live in namespaces the provisioner labels
+    # urumi.io/mcp-network=true; they in turn only accept traffic from the gateway pods.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              urumi.io/mcp-network: "true"
     {{- include "platform.internetEgress" . | nindent 4 }}
 ---
 # Dashboard: static files, reached only through the ingress controller. No egress.
@@ -90,9 +96,45 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: gateway
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: provisioner
       ports:
         - port: 5432
   egress: []
+{{- if .Values.provisioner.enabled }}
+---
+# Provisioner: not reachable by anything (only kubelet probes). It talks to Postgres,
+# DNS and the Kubernetes API, and nothing else: no internet, no other pod.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: provisioner
+  labels:
+    {{- include "platform.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: provisioner
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+    {{- include "platform.dnsEgress" . | nindent 4 }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgres
+      ports:
+        - port: 5432
+    # The Kubernetes API server. Its address differs per distribution (the node IP on kind
+    # and k3s), so the rule is by port; set networkPolicy.apiServerCidr to tighten it.
+    - to:
+        - ipBlock:
+            cidr: {{ .Values.networkPolicy.apiServerCidr }}
+      ports:
+        - { protocol: TCP, port: 6443 }
+        - { protocol: TCP, port: 443 }
+{{- end }}
 {{- end }}
 {{- if and .Values.networkPolicy.enabled .Values.ingress.tls.enabled }}
 ---

@@ -6,3 +6,7 @@ dist/
 .env.*
 !.env.*.example
 .secrets/
+
+# local-only
+graphify-out/
+*.pdf

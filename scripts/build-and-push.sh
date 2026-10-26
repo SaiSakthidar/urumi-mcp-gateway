@@ -10,11 +10,14 @@ REGISTRY="${1:?registry, e.g. ghcr.io/<user>}"
 TAG="${2:?tag, e.g. 0.1.0}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-for app in woo-mcp gateway dashboard everything-mcp; do
-  docker buildx build \
-    --platform linux/amd64,linux/arm64 \
-    -t "$REGISTRY/urumi-$app:$TAG" \
-    --push \
-    "$ROOT/apps/$app"
+for app in woo-mcp gateway dashboard everything-mcp provisioner; do
+  # The provisioner bundles the store chart, so its build context is the repo root.
+  if [ "$app" = provisioner ]; then
+    docker buildx build --platform linux/amd64,linux/arm64 \
+      -f "$ROOT/apps/provisioner/Dockerfile" -t "$REGISTRY/urumi-$app:$TAG" --push "$ROOT"
+  else
+    docker buildx build --platform linux/amd64,linux/arm64 \
+      -t "$REGISTRY/urumi-$app:$TAG" --push "$ROOT/apps/$app"
+  fi
 done
 echo "Pushed $REGISTRY/urumi-*:$TAG"

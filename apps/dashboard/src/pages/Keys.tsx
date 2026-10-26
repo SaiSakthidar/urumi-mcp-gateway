@@ -77,6 +77,12 @@ export function KeysPage({ me }: { me: Me }) {
             2,
           )}
         </pre>
+        <p>No key needed with OAuth: clients that support it (Claude Code, MCP Inspector) open a browser login.</p>
+        <pre>{`claude mcp add --transport http urumi ${mcpUrl}\n# then run /mcp in Claude Code and choose "Authenticate"`}</pre>
+        <p className="muted">
+          Many tools? Add <code>?tools=search</code> to the URL: the client then sees only <code>search_tools</code> and{" "}
+          <code>run_tool</code>, and finds the real tools by keyword.
+        </p>
       </div>
 
       <h3>My keys</h3>

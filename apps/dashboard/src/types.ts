@@ -11,7 +11,19 @@ export interface Me {
 export type ServerStatus = "connecting" | "connected" | "unreachable" | "disabled";
 export type AuthType = "none" | "bearer" | "header";
 
+export type ServerKind = "remote" | "hosted" | "store";
+
+export interface HostedInfo {
+  image: string;
+  port: number;
+  deployStatus: "deploying" | "running" | "failed" | "deleting";
+  deployDetail: string | null;
+  allowInternet: boolean;
+}
+
 export interface Server {
+  kind: ServerKind;
+  hosted?: HostedInfo;
   id: number;
   slug: string;
   displayName: string;
@@ -66,4 +78,30 @@ export interface AuditRow {
   duration_ms: number | null;
   outcome: string;
   error_message: string | null;
+}
+
+export type StoreStatus = "provisioning" | "ready" | "failed" | "deleting";
+
+export interface Store {
+  id: number;
+  slug: string;
+  name: string;
+  owner: string | null;
+  status: StoreStatus;
+  statusDetail: string | null;
+  url: string;
+  namespace: string;
+  createdAt: string;
+  canManage: boolean;
+  toolPrefix: string;
+}
+
+export interface ServerStats {
+  server: string;
+  calls: number;
+  errors: number;
+  errorRate: number;
+  avgMs: number | null;
+  p95Ms: number | null;
+  lastError: string | null;
 }

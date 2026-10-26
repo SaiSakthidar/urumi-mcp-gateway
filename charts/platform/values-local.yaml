@@ -7,3 +7,8 @@ gateway:
 dashboard:
   image:
     pullPolicy: Never
+provisioner:
+  image:
+    pullPolicy: Never
+  wooMcpImage:
+    pullPolicy: Never

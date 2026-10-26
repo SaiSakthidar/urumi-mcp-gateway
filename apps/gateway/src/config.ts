@@ -34,6 +34,20 @@ export const config = {
     .split(",")
     .map((h) => h.trim().toLowerCase())
     .filter(Boolean),
+  // Calls per minute per API key (or per user for chat); 0 turns the limit off.
+  rateLimitPerMinute: Number(process.env.RATE_LIMIT_PER_MINUTE ?? 120),
+  // With more visible tools than this, the chat agent gets search_tools + run_tool instead of every tool.
+  toolSearchThreshold: Number(process.env.TOOL_SEARCH_THRESHOLD ?? 30),
+  // Hosted MCP servers: the provisioner runs them in this namespace.
+  hostedNamespace: process.env.HOSTED_NAMESPACE ?? "mcp-hosted",
+  // Images may only come from these registries (docker.io covers Docker Hub). Set to "*" to allow any.
+  hostedImageRegistries: (process.env.HOSTED_IMAGE_REGISTRIES ?? "docker.io,ghcr.io,quay.io,mcr.microsoft.com")
+    .split(",")
+    .map((r) => r.trim().toLowerCase())
+    .filter(Boolean),
+  // Store provisioning guardrails.
+  maxStoresPerUser: Number(process.env.MAX_STORES_PER_USER ?? 2),
+  maxStoresTotal: Number(process.env.MAX_STORES_TOTAL ?? 6),
   // The chat agent tells the model today's date in this timezone (same as the store).
   storeTimezone: process.env.STORE_TIMEZONE ?? "UTC",
   llm: {

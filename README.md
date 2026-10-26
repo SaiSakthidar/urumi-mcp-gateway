@@ -6,10 +6,11 @@ A WooCommerce store on Kubernetes plus a team MCP gateway. An admin registers MC
 
 **Docs:**
 
-- [Design and tradeoffs](docs/design-and-tradeoffs.md)
+- [Design and tradeoffs](docs/design-and-tradeoffs.md) (architecture diagram included)
 - [Threat model](docs/threat-model.md)
 - [VPS / k3s deployment](docs/vps.md)
 - [Upgrades and rollbacks](docs/operations.md)
+- [Demo flow](docs/demo-dod.md) (definition of done, step by step)
 - [Demo script](docs/demo-script.md)
 
 ## Layout
@@ -25,8 +26,9 @@ A WooCommerce store on Kubernetes plus a team MCP gateway. An admin registers MC
 | `charts/mcp-servers` | woo-mcp + everything-mcp → namespace `mcp` |
 | `charts/platform` | gateway + dashboard + Postgres + provisioner → namespace `platform` |
 | `kind/` | kind cluster config and Traefik values (local only) |
+| `infra/` | Terraform (EC2, Elastic IP, security group) and Ansible (k3s, images, secrets, Helm) for the AWS deployment |
 | `deploy/` | cert-manager ClusterIssuer (prod, optional) |
-| `scripts/` | Cluster bring-up, secrets, image push, MCP smoke test |
+| `scripts/` | Cluster bring-up, secrets, image push, MCP smoke test, end-to-end suite (`e2e.sh`), upgrade demo |
 
 Each app is a standalone npm project with its own lockfile and Dockerfile.
 
